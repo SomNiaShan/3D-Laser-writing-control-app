@@ -1,0 +1,27 @@
+function row = batchDefaultRow(rowIndex)
+defaults = slm_default_drill_beam_options();
+row = cell(1, numel(batchColumnNames()));
+row{batchColumnIndex('Enabled')} = true;
+row{batchColumnIndex('Name')} = sprintf('beam_%03d', rowIndex);
+row{batchColumnIndex('AxiconMode')} = defaults.axiconMode;
+row{batchColumnIndex('ConeAngleDeg')} = defaults.axiconConeAngleDeg;
+row{batchColumnIndex('RadialPeriodMm')} = defaults.axiconRadialPeriodMm;
+row{batchColumnIndex('RadialPeriodPx')} = defaults.axiconRadialPeriodPx;
+row{batchColumnIndex('RadialCycles')} = defaults.axiconRadialCycles;
+row{batchColumnIndex('AxiconIndex')} = defaults.axiconIndex;
+row{batchColumnIndex('PhysicalBaseAngleDeg')} = defaults.axiconPhysicalBaseAngleDeg;
+row{batchColumnIndex('VortexCharge')} = defaults.vortexCharge;
+row{batchColumnIndex('HelicalGamma')} = defaults.helicalGamma;
+row{batchColumnIndex('HelicalOrder')} = defaults.helicalOrder;
+row{batchColumnIndex('HelicalOffsetDeg')} = defaults.helicalOffsetDeg;
+row{batchColumnIndex('OmegaInner')} = defaults.omegaInner;
+row{batchColumnIndex('OmegaOuter')} = defaults.omegaOuter;
+row{batchColumnIndex('GlobalLensFocalMm')} = 0;
+row{batchColumnIndex('GlobalXShift2Pi')} = 0;
+row{batchColumnIndex('GlobalYShift2Pi')} = 0;
+row{batchColumnIndex('GlobalApertureRadiusPx')} = 0;
+row{batchColumnIndex('GlobalApertureCenterXpx')} = 0;
+row{batchColumnIndex('GlobalApertureCenterYpx')} = 0;
+row{batchColumnIndex('SlmSettleSeconds')} = 0.2;
+row{batchColumnIndex('Notes')} = '';
+end

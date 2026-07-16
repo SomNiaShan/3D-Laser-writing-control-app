@@ -1,0 +1,17 @@
+*.asv
+*.autosave
+*.m~
+*.mlx~
+
+slprj/
+codegen/
+simulink/
+outputs/
+
+*.mexw64
+*.mexw32
+*.mexmaci64
+*.mexa64
+
+.DS_Store
+Thumbs.db
