@@ -6,6 +6,10 @@ classdef CarbideController < handle
         Ports
     end
 
+    properties (Access = private)
+        RequestInProgress (1, 1) logical = false
+    end
+
     methods
         function obj = CarbideController(model, ports)
             arguments
@@ -28,7 +32,7 @@ classdef CarbideController < handle
 
             obj.Model.State.carbide.baseUrl = string(obj.Model.Services.carbide.baseUrl(obj.Model.Config));
             try
-                basic = obj.Model.Services.carbide.getBasic(obj.Model.Config);
+                basic = obj.runCarbideRequest(@() obj.Model.Services.carbide.getBasic(obj.Model.Config));
                 validateCarbideBasicResponse(basic);
             catch ME
                 obj.Model.State.carbide.connected = false;
@@ -44,7 +48,8 @@ classdef CarbideController < handle
             obj.Ports.logMessage(sprintf('Carbide Basic JSON: %s', compactJsonText(basic)));
 
             try
-                obj.Model.State.carbide.presets = obj.Model.Services.carbide.getPresets(obj.Model.Config);
+                obj.Model.State.carbide.presets = obj.runCarbideRequest( ...
+                    @() obj.Model.Services.carbide.getPresets(obj.Model.Config));
                 obj.updateCarbidePresetDropDown();
                 obj.Ports.logMessage(sprintf('Carbide presets loaded: %d.', obj.carbidePresetCount()));
             catch ME
@@ -79,7 +84,8 @@ classdef CarbideController < handle
             obj.requireCarbideCanWrite();
             ppDivider = positiveInteger(obj.Model.Ui.CarbidePpDividerField.Value, 'Carbide PP divider');
             obj.assertCarbidePpDividerAllowed(ppDivider);
-            obj.Model.Services.carbide.setPpDivider(obj.Model.Config, ppDivider);
+            obj.runCarbideRequest( ...
+                @() obj.Model.Services.carbide.setPpDivider(obj.Model.Config, ppDivider));
             obj.refreshCarbideStatusOnce();
             obj.Ports.logMessage(sprintf('Carbide target PP divider set to %d.', ppDivider));
         end
@@ -108,7 +114,8 @@ classdef CarbideController < handle
 
         function enableCarbideOutputImpl(obj)
             obj.requireCarbideCanWrite();
-            obj.Model.Services.carbide.enableOutput(obj.Model.Config);
+            obj.runCarbideRequest( ...
+                @() obj.Model.Services.carbide.enableOutput(obj.Model.Config));
             obj.refreshCarbideStatusOnce();
             obj.Ports.logMessage('Carbide laser shutter open command sent.');
         end
@@ -119,7 +126,8 @@ classdef CarbideController < handle
 
         function closeCarbideOutputImpl(obj)
             obj.requireCarbideConnected();
-            obj.Model.Services.carbide.closeOutput(obj.Model.Config);
+            obj.runCarbideRequest( ...
+                @() obj.Model.Services.carbide.closeOutput(obj.Model.Config));
             obj.refreshCarbideStatusOnce();
             obj.Ports.logMessage('Carbide laser shutter close command sent.');
         end
@@ -148,7 +156,8 @@ classdef CarbideController < handle
 
         function standbyCarbideImpl(obj)
             obj.requireCarbideCanWrite();
-            obj.Model.Services.carbide.standby(obj.Model.Config);
+            obj.runCarbideRequest( ...
+                @() obj.Model.Services.carbide.standby(obj.Model.Config));
             obj.Ports.logMessage('Carbide standby command sent.');
             try
                 obj.refreshCarbideStatusOnce();
@@ -165,8 +174,10 @@ classdef CarbideController < handle
         function applyCarbidePresetImpl(obj)
             obj.requireCarbideCanWrite();
             presetIndex = obj.selectedCarbidePresetIndex();
-            obj.Model.Services.carbide.selectPreset(obj.Model.Config, presetIndex);
-            obj.Model.Services.carbide.applySelectedPreset(obj.Model.Config);
+            obj.runCarbideRequest( ...
+                @() obj.Model.Services.carbide.selectPreset(obj.Model.Config, presetIndex));
+            obj.runCarbideRequest( ...
+                @() obj.Model.Services.carbide.applySelectedPreset(obj.Model.Config));
             obj.refreshCarbideStatusOnce();
             obj.resetCarbideCommandFieldsFromBasic();
             obj.Ports.logMessage(sprintf('Carbide preset %d applied.', presetIndex));
@@ -247,9 +258,16 @@ classdef CarbideController < handle
                 return;
             end
 
+            if obj.RequestInProgress
+                return;
+            end
+
             try
                 obj.refreshCarbideStatusOnce();
             catch ME
+                if strcmp(ME.identifier, 'lw:CarbideRequestBusy')
+                    return;
+                end
                 obj.Model.State.carbide.pollFailureCount = obj.Model.State.carbide.pollFailureCount + 1;
                 obj.Model.State.carbide.lastError = string(ME.message);
                 if obj.Model.State.carbide.pollFailureCount == 1
@@ -269,7 +287,7 @@ classdef CarbideController < handle
         end
 
         function refreshCarbideStatusOnce(obj)
-            basic = obj.Model.Services.carbide.getBasic(obj.Model.Config);
+            basic = obj.runCarbideRequest(@() obj.Model.Services.carbide.getBasic(obj.Model.Config));
             validateCarbideBasicResponse(basic);
             obj.Model.State.carbide.connected = true;
             obj.Model.State.carbide.lastBasic = basic;
@@ -684,5 +702,25 @@ classdef CarbideController < handle
             pulseEnergyUj = carbidePulseEnergyMicroJoules(obj.Model.State.carbide.lastBasic);
         end
 
+    end
+
+    methods (Access = private)
+        function varargout = runCarbideRequest(obj, requestFcn)
+            if obj.RequestInProgress
+                error('lw:CarbideRequestBusy', 'Another Carbide request is already in progress.');
+            end
+
+            obj.RequestInProgress = true;
+            cleanupObj = onCleanup(@() obj.releaseCarbideRequest());
+            if nargout == 0
+                requestFcn();
+                return;
+            end
+            [varargout{1:nargout}] = requestFcn();
+        end
+
+        function releaseCarbideRequest(obj)
+            obj.RequestInProgress = false;
+        end
     end
 end
