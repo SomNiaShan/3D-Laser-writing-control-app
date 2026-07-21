@@ -418,7 +418,10 @@ classdef StageLaserController < handle
 
         function fireExposureImpl(obj)
             obj.requireLaserReady();
-            exposureSeconds = positiveDurationMicroseconds(obj.Model.Ui.ExposureTimeField.Value, 'Exposure time');
+            exposureMicroseconds = lw_validate_stage_schedule_duration_us( ...
+                positiveScalar(obj.Model.Ui.ExposureTimeField.Value, 'Exposure time'), ...
+                obj.Model.Config, 'Manual exposure duration', false);
+            exposureSeconds = exposureMicroseconds .* 1e-6;
             repeatCount = positiveInteger(obj.Model.Ui.ExposureRepeatField.Value, 'Repeat count');
             intervalSeconds = nonnegativeScalar(obj.Model.Ui.ExposureIntervalField.Value, 'Interval');
             powerPercent = obj.Model.Ui.PreviewPowerField.Value;

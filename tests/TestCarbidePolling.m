@@ -57,6 +57,26 @@ classdef TestCarbidePolling < matlab.unittest.TestCase
             testCase.verifyTrue(any(contains(messages.Value, 'snapshot unavailable')));
             testCase.verifyTrue(any(contains(messages.Value, 'run start snapshot:')));
         end
+
+        function repetitionPeriodIsDerivedFromFrequencyKHz(testCase)
+            basic = struct('ActualOutputFrequency', 0.5);
+
+            testCase.verifyEqual(carbideRepetitionPeriodMicroseconds(basic), 2000);
+            testCase.verifyEqual(formatCarbideRepetitionPeriodField(basic), '2000');
+
+            basic.ActualOutputFrequency = 80;
+            testCase.verifyEqual(carbideRepetitionPeriodMicroseconds(basic), 12.5);
+            testCase.verifyEqual(formatCarbideRepetitionPeriodField(basic), '12.500');
+        end
+
+        function repetitionPeriodRejectsUnavailableOrNonpositiveFrequency(testCase)
+            testCase.verifyTrue(isnan(carbideRepetitionPeriodMicroseconds(struct())));
+            testCase.verifyEqual(formatCarbideRepetitionPeriodField(struct()), '-');
+            testCase.verifyEqual(formatCarbideRepetitionPeriodField( ...
+                struct('ActualOutputFrequency', 0)), '-');
+            testCase.verifyEqual(formatCarbideRepetitionPeriodField( ...
+                struct('ActualOutputFrequency', -1)), '-');
+        end
     end
 end
 

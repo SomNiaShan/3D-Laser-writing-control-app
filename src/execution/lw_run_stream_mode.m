@@ -18,6 +18,8 @@ end
 if ~isfield(options, 'ttlGateWidthUs')
     options.ttlGateWidthUs = config.stage.ttlGateWidthUs;
 end
+options.ttlGateWidthUs = lw_validate_stage_schedule_duration_us( ...
+    options.ttlGateWidthUs, config, 'TTL Gate Width', false);
 if ~isfield(options, 'pulseTimesSeconds') || isempty(options.pulseTimesSeconds)
     options.pulseTimesSeconds = localPulseTimes(trajectory, options.targetSpeedMmPerSecond);
 end
@@ -74,7 +76,8 @@ try
         streams.(axisName).setupStore(buffers.(axisName), 1);
     end
 
-    localAppendPulse(streams.(triggerAxisName), triggerChannel, options.ttlGateWidthUs);
+    localAppendPulse(streams.(triggerAxisName), triggerChannel, ...
+        options.ttlGateWidthUs, config);
 
     for i = 2:numel(trajectory.x)
         dx = trajectory.x(i) - trajectory.x(i - 1);
@@ -90,10 +93,11 @@ try
         localAppendAxisAction(streams.y, dy, trajectory.y(i), dt);
         localAppendAxisAction(streams.z, dz, trajectory.z(i), dt);
 
-        localAppendPulse(streams.(triggerAxisName), triggerChannel, options.ttlGateWidthUs);
+        localAppendPulse(streams.(triggerAxisName), triggerChannel, ...
+            options.ttlGateWidthUs, config);
     end
 
-    localAppendTriggerState(streams.(triggerAxisName), triggerChannel, false);
+    localAppendTriggerState(streams.(triggerAxisName), triggerChannel, false, config);
 
     fields = fieldnames(streams);
     for i = 1:numel(fields)
@@ -233,21 +237,17 @@ end
 streamHandle.wait(durationSeconds, zaber.motion.Units.TIME_SECONDS);
 end
 
-function localAppendPulse(streamHandle, channelNumber, pulseWidthUs)
+function localAppendPulse(streamHandle, channelNumber, pulseWidthUs, config)
 streamHandle.getIo().setDigitalOutputSchedule( ...
     channelNumber, ...
-    zaber.motion.ascii.DigitalOutputAction.ON, ...
-    zaber.motion.ascii.DigitalOutputAction.OFF, ...
+    lw_stage_pulse_trigger_action(true, config), ...
+    lw_stage_pulse_trigger_action(false, config), ...
     pulseWidthUs, ...
     zaber.motion.Units.TIME_MICROSECONDS);
 end
 
-function localAppendTriggerState(streamHandle, channelNumber, isActive)
-if isActive
-    action = zaber.motion.ascii.DigitalOutputAction.ON;
-else
-    action = zaber.motion.ascii.DigitalOutputAction.OFF;
-end
+function localAppendTriggerState(streamHandle, channelNumber, isActive, config)
+action = lw_stage_pulse_trigger_action(isActive, config);
 streamHandle.setDigitalOutput(channelNumber, action);
 end
 

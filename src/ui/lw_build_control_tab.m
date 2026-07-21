@@ -349,20 +349,28 @@ controlUi.CarbideActualFrequencyLabel.Layout.Row = 2; controlUi.CarbideActualFre
 helpers.createRightLabel(carbideGrid, 'Actual PP', 3, 1);
 controlUi.CarbideActualPpLabel = uilabel(carbideGrid, 'Text', '-');
 controlUi.CarbideActualPpLabel.Layout.Row = 3; controlUi.CarbideActualPpLabel.Layout.Column = 2;
-helpers.createRightLabel(carbideGrid, 'Pulse (fs)', 3, 3);
+periodTooltip = ['Derived from the actual output frequency: period (us) = 1000 / frequency (kHz). ' ...
+    'Use it to compare with the gate width; it does not imply pulse synchronization.'];
+periodLabel = helpers.createRightLabel(carbideGrid, 'Period (us)', 3, 3);
+periodLabel.Tooltip = periodTooltip;
+controlUi.CarbideRepetitionPeriodLabel = uilabel(carbideGrid, 'Text', '-', ...
+    'Tooltip', periodTooltip);
+controlUi.CarbideRepetitionPeriodLabel.Layout.Row = 3;
+controlUi.CarbideRepetitionPeriodLabel.Layout.Column = 4;
+
+helpers.createRightLabel(carbideGrid, 'Pulse (fs)', 4, 1);
 controlUi.CarbideActualPulseLabel = uilabel(carbideGrid, 'Text', '-');
-controlUi.CarbideActualPulseLabel.Layout.Row = 3; controlUi.CarbideActualPulseLabel.Layout.Column = 4;
-
-helpers.createRightLabel(carbideGrid, 'Output', 4, 1);
-controlUi.CarbideOutputEnabledLabel = uilabel(carbideGrid, 'Text', '-');
-controlUi.CarbideOutputEnabledLabel.Layout.Row = 4; controlUi.CarbideOutputEnabledLabel.Layout.Column = 2;
-helpers.createRightLabel(carbideGrid, 'Shutter', 4, 3);
-controlUi.CarbideShutterStateLabel = uilabel(carbideGrid, 'Text', '-');
-controlUi.CarbideShutterStateLabel.Layout.Row = 4; controlUi.CarbideShutterStateLabel.Layout.Column = 4;
-
-helpers.createRightLabel(carbideGrid, 'Pulse E (uJ)', 5, 1);
+controlUi.CarbideActualPulseLabel.Layout.Row = 4; controlUi.CarbideActualPulseLabel.Layout.Column = 2;
+helpers.createRightLabel(carbideGrid, 'Pulse E (uJ)', 4, 3);
 controlUi.CarbidePulseEnergyLabel = uilabel(carbideGrid, 'Text', '-');
-controlUi.CarbidePulseEnergyLabel.Layout.Row = 5; controlUi.CarbidePulseEnergyLabel.Layout.Column = 2;
+controlUi.CarbidePulseEnergyLabel.Layout.Row = 4; controlUi.CarbidePulseEnergyLabel.Layout.Column = 4;
+
+helpers.createRightLabel(carbideGrid, 'Output', 5, 1);
+controlUi.CarbideOutputEnabledLabel = uilabel(carbideGrid, 'Text', '-');
+controlUi.CarbideOutputEnabledLabel.Layout.Row = 5; controlUi.CarbideOutputEnabledLabel.Layout.Column = 2;
+helpers.createRightLabel(carbideGrid, 'Shutter', 5, 3);
+controlUi.CarbideShutterStateLabel = uilabel(carbideGrid, 'Text', '-');
+controlUi.CarbideShutterStateLabel.Layout.Row = 5; controlUi.CarbideShutterStateLabel.Layout.Column = 4;
 
 controlUi.CarbideEnableOutputButton = uibutton(carbideGrid, 'Text', 'Open Laser Shutter', ...
     'ButtonPushedFcn', callbacks.enableCarbideOutput);
@@ -411,6 +419,8 @@ helpers.enableScrolling(exposureGrid);
 helpers.createRightLabel(exposureGrid, 'Exposure (us)', 1, 1);
 controlUi.ExposureTimeField = uieditfield(exposureGrid, 'numeric');
 controlUi.ExposureTimeField.Layout.Row = 1; controlUi.ExposureTimeField.Layout.Column = 2;
+controlUi.ExposureTimeField.Tooltip = ...
+    'Zaber hardware-timed exposure; minimum and resolution are both 100 us in this setup.';
 helpers.createRightLabel(exposureGrid, 'Repeat', 2, 1);
 controlUi.ExposureRepeatField = uieditfield(exposureGrid, 'numeric');
 controlUi.ExposureRepeatField.Layout.Row = 2; controlUi.ExposureRepeatField.Layout.Column = 2;

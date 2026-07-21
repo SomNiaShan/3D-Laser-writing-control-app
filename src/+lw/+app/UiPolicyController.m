@@ -103,6 +103,8 @@ classdef UiPolicyController < handle
             carbideEnabled = obj.Ports.carbide.isCarbideEnabled();
             trajectoryLoaded = ~isempty(obj.Model.Trajectory);
             trajectoryReady = trajectoryLoaded && ~obj.Model.TrajectoryInputsDirty;
+            pointUsesPlanTiming = trajectoryReady && ...
+                trajectoryHasPerPointTiming(obj.Model.Trajectory);
             isImported = obj.Ports.trajectory.selectedSourceMode() == "Imported Points";
             isZSweepMode = obj.Ports.run.selectedRunMode() == "Z Sweep Mode";
             isZSweepMatrixEnabled = isZSweepMode && obj.Model.Ui.ZSweepMatrixCheckBox.Value;
@@ -151,7 +153,8 @@ classdef UiPolicyController < handle
             setEnable(obj.Model.Ui.UseCurrentOriginButton, stagesConnected && configurationUnlocked);
             setEnable(obj.Model.Ui.ZSweepUseCurrentButton, stagesConnected && configurationUnlocked && isZSweepMode);
             setEnable({obj.Model.Ui.PointExposureLabel, obj.Model.Ui.PointExposureField, obj.Model.Ui.PointPauseLabel, obj.Model.Ui.PointPauseField}, ...
-                configurationUnlocked && obj.Ports.run.selectedRunMode() == "Point Mode");
+                configurationUnlocked && obj.Ports.run.selectedRunMode() == "Point Mode" && ...
+                ~pointUsesPlanTiming);
             setEnable({obj.Model.Ui.StreamSpeedLabel, obj.Model.Ui.StreamSpeedField, obj.Model.Ui.TTLGateWidthLabel, obj.Model.Ui.TTLGateWidthField}, ...
                 configurationUnlocked && isStreamMode);
             setEnable({obj.Model.Ui.ZSweepPowerLabel, obj.Model.Ui.ZSweepPowerField}, ...

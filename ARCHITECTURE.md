@@ -55,6 +55,21 @@ Z Sweep has no loaded trajectory and therefore owns a separate Sweep Power
 parameter. Control-tab Manual Power and Exposure Power are manual-hardware
 settings only.
 
+## Point timing ownership
+
+Writing-plan `dwell_s` and `pause_s` values are the canonical Point Mode timing
+snapshot. Preflight resolves them into `trajectory.dwellSeconds` and
+`trajectory.preWritePauseSeconds`; execution, summaries, and run-log snapshots
+consume those same vectors. Run-tab Default Dwell and Default Settle are
+fallbacks only for trajectories without writing-plan timing.
+
+Positive point dwell and Stream Mode gate durations must be representable by
+the configured Zaber digital-output scheduler. Point and manual exposures use
+the device's scheduled active-to-inactive action; MATLAB waits only to
+coordinate UI, STOP, and the next operation. Logical active/inactive requests
+are mapped to electrical ON/OFF through the explicitly configured trigger
+polarity.
+
 ## Safety sequence
 
 `SafetyCoordinator.shutdown()` is idempotent and invokes every step under an
@@ -80,7 +95,7 @@ Before committing a behavior-preserving change:
 2. Run `run_refactor_checks()` from this directory.
 3. For lifecycle or GUI work, also run with `IncludeStress=true` and
    `IncludeScreenshots=true`.
-4. Verify the GUI still has 515 objects and the locked signature remains
-   `cced1b618759e3bae073c3755614f07981ab4c396b9637259d8ef5427242369a`.
+4. Verify the GUI still has 527 objects and the locked signature remains
+   `d3e089b229289266edaadd6820f3094987982a03be3f877cdbb74daa53f0aa37`.
 5. Keep behavior fixes separate from refactor-only commits.
 6. Run the supervised hardware checklist before promoting this entry point.

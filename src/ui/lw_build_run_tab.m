@@ -43,12 +43,16 @@ paramGrid = uigridlayout(paramPanel, [17, 4], ...
     'RowSpacing', 6);
 helpers.enableScrolling(paramGrid);
 runUi.RunParameterGrid = paramGrid;
-runUi.PointExposureLabel = helpers.createRightLabel(paramGrid, 'Point Exp (us)', 1, 1);
+runUi.PointExposureLabel = helpers.createRightLabel(paramGrid, 'Default Dwell (us)', 1, 1);
 runUi.PointExposureField = uieditfield(paramGrid, 'numeric');
 runUi.PointExposureField.Layout.Row = 1; runUi.PointExposureField.Layout.Column = 2;
-runUi.PointPauseLabel = helpers.createRightLabel(paramGrid, 'Point Pause (s)', 1, 3);
+runUi.PointExposureField.Tooltip = ...
+    'Fallback dwell for plans without dwell_s; writing plans use each row''s dwell_s.';
+runUi.PointPauseLabel = helpers.createRightLabel(paramGrid, 'Default Settle (s)', 1, 3);
 runUi.PointPauseField = uieditfield(paramGrid, 'numeric');
 runUi.PointPauseField.Layout.Row = 1; runUi.PointPauseField.Layout.Column = 4;
+runUi.PointPauseField.Tooltip = ...
+    'Fallback pre-write settling time; writing plans use each row''s pause_s.';
 runUi.StreamSpeedLabel = helpers.createRightLabel(paramGrid, 'Stream Speed (mm/s)', 2, 1);
 runUi.StreamSpeedField = uieditfield(paramGrid, 'numeric');
 runUi.StreamSpeedField.Layout.Row = 2; runUi.StreamSpeedField.Layout.Column = 2;
@@ -60,6 +64,8 @@ runUi.ZSweepPowerField.Layout.Row = 2; runUi.ZSweepPowerField.Layout.Column = 4;
 runUi.TTLGateWidthLabel = helpers.createRightLabel(paramGrid, 'TTL Gate Width (us)', 3, 1);
 runUi.TTLGateWidthField = uieditfield(paramGrid, 'numeric');
 runUi.TTLGateWidthField.Layout.Row = 3; runUi.TTLGateWidthField.Layout.Column = 2;
+runUi.TTLGateWidthField.Tooltip = ...
+    'Zaber hardware gate width; minimum and resolution are both 100 us in this setup.';
 runUi.ZSweepDirectionLabel = helpers.createRightLabel(paramGrid, 'Exposure Dir', 3, 3);
 runUi.ZSweepDirectionDropDown = uidropdown(paramGrid, ...
     'Items', {'Back -> Front', 'Front -> Back', 'Both Directions'}, ...

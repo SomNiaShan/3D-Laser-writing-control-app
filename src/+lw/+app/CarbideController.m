@@ -448,6 +448,7 @@ classdef CarbideController < handle
                 obj.Model.Ui.CarbideStatusLabel.Text = 'Disconnected';
                 obj.Model.Ui.CarbideActualPowerLabel.Text = '-';
                 obj.Model.Ui.CarbideActualFrequencyLabel.Text = '-';
+                obj.Model.Ui.CarbideRepetitionPeriodLabel.Text = '-';
                 obj.Model.Ui.CarbideActualPpLabel.Text = '-';
                 obj.Model.Ui.CarbideActualPulseLabel.Text = '-';
                 obj.Model.Ui.CarbideOutputEnabledLabel.Text = '-';
@@ -463,6 +464,7 @@ classdef CarbideController < handle
                 char(obj.Model.State.carbide.baseUrl), char(carbideOperatingStateText(basic)));
             obj.Model.Ui.CarbideActualPowerLabel.Text = formatCarbideNumericField(basic, ["ActualOutputPower", "OutputPower", "ActualPower"]);
             obj.Model.Ui.CarbideActualFrequencyLabel.Text = formatCarbideNumericField(basic, ["ActualOutputFrequency", "ActualFrequency", "OutputFrequency"]);
+            obj.Model.Ui.CarbideRepetitionPeriodLabel.Text = formatCarbideRepetitionPeriodField(basic);
             obj.Model.Ui.CarbideActualPpLabel.Text = formatCarbideNumericField(basic, ["ActualPpDivider", "PpDivider"]);
             obj.Model.Ui.CarbideActualPulseLabel.Text = formatCarbideNumericField(basic, ["ActualPulseDuration", "PulseDuration"]);
             obj.Model.Ui.CarbideOutputEnabledLabel.Text = formatCarbideOutputEnabled(basic);

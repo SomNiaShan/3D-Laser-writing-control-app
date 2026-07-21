@@ -11,7 +11,13 @@ config.stage.deviceOrder = struct('x', 1, 'y', 3, 'z', 2);
 config.stage.axisMap = struct('x', 1, 'y', 1, 'z', 1);
 config.stage.pulseTriggerAxis = 'x';
 config.stage.pulseTriggerChannel = 1;
-config.stage.ttlGateWidthUs = 50;
+% CARBIDE PP_EN is configured active-high in this setup. Keep this explicit:
+% the inactive level is a safety-critical hardware state.
+config.stage.pulseTriggerActiveHigh = true;
+% Zaber ASCII scheduled digital outputs use 0.1 ms units (firmware 7.37+).
+config.stage.digitalOutputScheduleMinUs = 100;
+config.stage.digitalOutputScheduleResolutionUs = 100;
+config.stage.ttlGateWidthUs = 100;
 config.stage.maxPulseTriggerRateHz = 1e3;
 
 config.daq = struct();
@@ -44,9 +50,10 @@ config.motion.travelLimits = struct( ...
     'z', [0, 150]);
 
 config.execution = struct();
+% Fallback pre-write settle for plans without per-row pause_s values.
 config.execution.pointPause = 0.1;
-% Internal duration unit is seconds; the app UI displays this in us.
-config.execution.pointExposureTime = 1e-6;
+% Fallback dwell for plans without per-row dwell_s; UI displays microseconds.
+config.execution.pointExposureTime = 100e-6;
 config.execution.streamTargetSpeed = 1.0;
 config.execution.zSweepRecoveryAttempts = 3;
 

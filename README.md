@@ -43,8 +43,8 @@ Run lifecycle stress and the locked screenshot comparison with:
 report = run_refactor_checks(IncludeStress=true, IncludeScreenshots=true);
 ```
 
-The locked GUI contract is 515 objects with normalized signature SHA-256
-`cced1b618759e3bae073c3755614f07981ab4c396b9637259d8ef5427242369a`.
+The locked GUI contract is 527 objects with normalized signature SHA-256
+`d3e089b229289266edaadd6820f3094987982a03be3f877cdbb74daa53f0aa37`.
 Mako device-discovery availability is normalized because it is runtime
 hardware state rather than a static GUI property.
 
@@ -57,6 +57,26 @@ fixed power, while XYZP and writing-plan files always use their power column.
 Stream Mode accepts only plans whose stored power is constant. Sweep Power is
 separate and is used only by Z Sweep Mode. Manual power fields on the Control
 tab never modify a loaded plan.
+
+## Point timing semantics
+
+Point Mode is a timed-dwell workflow, not a single-pulse workflow. For an
+imported writing plan, each `mode=point` row's `dwell_s` and `pause_s` values
+are canonical: the stage moves to the point, waits for `pause_s`, and then
+uses a Zaber firmware-scheduled digital-output gate for `dwell_s`. Run-tab
+Default Dwell and Default Settle values are used only by trajectories that do
+not contain per-row writing-plan timing.
+
+The configured X-LDA digital output supports scheduled durations from 100 us
+in 100 us increments. Positive dwell or Stream Mode gate values below 100 us,
+or values that are not a multiple of 100 us, are rejected instead of rounded.
+A zero point dwell is retained as an explicit no-exposure point. The trigger
+polarity is safety-critical and is set explicitly by
+`config.stage.pulseTriggerActiveHigh`.
+
+Stream Mode likewise produces a timed level gate at each trajectory point.
+It does not claim or guarantee one optical pulse per gate; optical pulse count
+depends on the CARBIDE repetition rate and the unsynchronized gate phase.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) before changing controller ownership.
 Physical-device validation remains a supervised lab step documented in

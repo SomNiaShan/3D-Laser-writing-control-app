@@ -18,6 +18,10 @@ before enabling any output.
 
 - Zaber: connect, home, live position, absolute move, every jog direction,
   bounds rejection, stop during motion, disconnect, and reconnect.
+- Zaber timing: with the laser disabled or disconnected from PP_EN, probe
+  device 01 (X-LDA150A-AE53D12) D12 pin 1 relative to pin 4. Confirm configured
+  inactive level, active level, a requested 100 us scheduled gate, actual gate
+  width, and repeated-gate jitter. Confirm Zaber and CARBIDE grounds are common.
 - NI DAQ / laser: connect, laser on/off indication, one supervised manual
   exposure, STOP during exposure, and measured zero output after STOP.
 - Carbide: connect, poll, preset download/apply, PP divider, output enable,
@@ -30,10 +34,15 @@ before enabling any output.
 
 ## Workflow checks
 
-- Point Mode: start, pause, resume, STOP, normal finish, and error recovery.
+- Point Mode: import at least two point rows with different `dwell_s` and
+  `pause_s` values; verify move -> pre-write settle -> exposure ordering,
+  measured gate widths, start, pause before exposure, resume, STOP during a
+  long dwell, zero-dwell behavior, normal finish, and error recovery. Confirm
+  sub-100-us and non-100-us-multiple dwell values are rejected at preflight.
 - Stream Mode: start, STOP, normal finish, trigger-rate validation, and error
   recovery.
-- Cut Plan Mode: preflight, grouped execution, STOP, and output comparison.
+- Cut Plan Mode: preflight, pre-write settling at each lead-in position,
+  grouped execution, STOP, and output comparison.
 - Z Sweep: single and matrix previews, start, pause, resume, STOP, Zaber
   reconnect recovery, and return-position behavior.
 - Single imaging: capture stack, auto exposure, STOP during move/settle/capture,

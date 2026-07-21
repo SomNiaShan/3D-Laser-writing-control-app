@@ -205,9 +205,9 @@ classdef RunController < handle
                         obj.Ports.logMessage(sprintf('Point mode resumed at point %d of %d.', ...
                             options.startIndex, numel(preflight.trajectory.x)));
                     end
-                    options.pauseSeconds = preflight.pauseSeconds;
-                    options.exposureTimeSeconds = preflight.exposureTimeSeconds;
                     options.motion = preflight.motion;
+                    options.moveFcn = obj.Model.Services.stage.moveAbsolute;
+                    options.exposureFcn = obj.Model.Services.laser.manualExposure;
                     options.laserStateFcn = @(isOn) obj.Ports.stageLaser.setLaserState(isOn);
                     [obj.Model.State, pointResult] = obj.Model.Services.execution.runPoint( ...
                         obj.Model.State, obj.Model.Config, preflight.trajectory, options);
@@ -711,10 +711,18 @@ classdef RunController < handle
 
             preflight = struct();
             preflight.motion = obj.Ports.stageLaser.readAbsoluteMotion();
-            preflight.pauseSeconds = positiveScalar(obj.Model.Ui.PointPauseField.Value, 'Point pause');
-            preflight.exposureTimeSeconds = positiveDurationMicroseconds(obj.Model.Ui.PointExposureField.Value, 'Point exposure');
-            preflight.exposureMicroseconds = double(obj.Model.Ui.PointExposureField.Value);
-            preflight.trajectory = obj.Model.Trajectory;
+            if trajectoryHasPerPointTiming(obj.Model.Trajectory)
+                defaultDwellSeconds = obj.Model.Config.execution.pointExposureTime;
+                defaultSettleSeconds = obj.Model.Config.execution.pointPause;
+            else
+                defaultDwellSeconds = positiveDurationMicroseconds( ...
+                    obj.Model.Ui.PointExposureField.Value, 'Default point dwell');
+                defaultSettleSeconds = nonnegativeScalar( ...
+                    obj.Model.Ui.PointPauseField.Value, 'Default pre-write settle');
+            end
+            [preflight.trajectory, preflight.pointTiming] = ...
+                lw_prepare_point_run_trajectory(obj.Model.Trajectory, ...
+                defaultDwellSeconds, defaultSettleSeconds, obj.Model.Config);
             preflight.analysis = obj.analyzeTrajectoryForExecution(preflight.trajectory);
             obj.validateTrajectoryForRun(preflight.trajectory);
             preflight.carbideSnapshot = obj.Ports.carbide.currentCarbideSnapshot();
@@ -740,7 +748,7 @@ classdef RunController < handle
             preflight.pulseSpeedMmPerSecond = positiveScalar(obj.Model.Ui.StreamSpeedField.Value, 'Stream speed');
             preflight.powerPercent = trajectoryConstantPower(obj.Model.Trajectory);
             preflight.ttlGateWidthUs = obj.configuredTtlGateWidthUs();
-            preflight.maxLaserRepetitionRateKHz = 1000 / preflight.ttlGateWidthUs;
+            preflight.inverseGatePeriodKHz = 1000 / preflight.ttlGateWidthUs;
             preflight.maxTriggerRateHz = obj.configuredMaxPulseTriggerRateHz();
             preflight.trajectory = obj.Model.Trajectory;
             preflight.analysis = obj.analyzeTrajectoryForExecution(preflight.trajectory);
@@ -1071,6 +1079,11 @@ classdef RunController < handle
                 case "Moving"
                     obj.Model.RunCurrentText = sprintf('X %.3f | Y %.3f | Z %.3f | Moving %d/%d', ...
                         target.x, target.y, target.z, index, total);
+                case "Settling"
+                    obj.Model.RunCurrentText = sprintf('X %.3f | Y %.3f | Z %.3f | Settling %d/%d', ...
+                        target.x, target.y, target.z, index, total);
+                    obj.Model.State.currentPosition = target;
+                    obj.Ports.syncPositionFields();
                 case "Exposing"
                     obj.Model.RunCurrentText = sprintf('X %.3f | Y %.3f | Z %.3f | Exposing %d/%d', ...
                         target.x, target.y, target.z, index, total);
@@ -1120,6 +1133,8 @@ classdef RunController < handle
             switch phase
                 case "Moving"
                     phaseFraction = 0.15;
+                case "Settling"
+                    phaseFraction = 0.5;
                 case "Exposing"
                     phaseFraction = 0.75;
                 case "Stream"
@@ -1209,12 +1224,22 @@ classdef RunController < handle
                     rowHeights = repmat({0}, 1, 17);
                     rowHeights([1, 16, 17]) = {'fit'};
                     obj.Model.Ui.RunParameterGrid.RowHeight = rowHeights;
-                    obj.Model.Ui.RunParameterHintLabel.Text = 'Point Mode uses the execution power stored at each point in the loaded plan.';
+                    if trajectoryHasPerPointTiming(obj.Model.Trajectory)
+                        obj.Model.Ui.RunParameterHintLabel.Text = ...
+                            ['Point Mode uses each writing-plan row''s power, dwell_s, and ', ...
+                            'pre-write pause_s. Default fields are disabled.'];
+                    else
+                        obj.Model.Ui.RunParameterHintLabel.Text = ...
+                            ['Point Mode uses stored point power plus the default dwell and ', ...
+                            'pre-write settle values above.'];
+                    end
                 case "Stream Mode"
                     rowHeights = repmat({0}, 1, 17);
                     rowHeights([2, 3, 16, 17]) = {'fit'};
                     obj.Model.Ui.RunParameterGrid.RowHeight = rowHeights;
-                    obj.Model.Ui.RunParameterHintLabel.Text = 'Stream Mode uses the loaded plan power and requires it to be constant.';
+                    obj.Model.Ui.RunParameterHintLabel.Text = ...
+                        ['Stream Mode uses constant plan power and a timed level gate at each point; ', ...
+                        'it does not guarantee one optical pulse per gate.'];
                 case "Cut Plan Mode"
                     rowHeights = repmat({0}, 1, 17);
                     rowHeights([16, 17]) = {'fit'};
@@ -1310,6 +1335,8 @@ classdef RunController < handle
 
         function value = configuredTtlGateWidthUs(obj)
             value = positiveScalar(obj.Model.Ui.TTLGateWidthField.Value, 'TTL Gate Width');
+            value = lw_validate_stage_schedule_duration_us( ...
+                value, obj.Model.Config, 'TTL Gate Width', false);
         end
 
         function value = configuredMaxPulseTriggerRateHz(obj)

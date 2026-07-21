@@ -74,6 +74,23 @@ try
             result = localRunResult("stopped", cutIndex, localCurrentPositionTarget(state), cutIndex - 1);
             return;
         end
+        if options.pauseRequestedFcn()
+            result = localRunResult("paused", cutIndex, leadTarget, cutIndex - 1);
+            return;
+        end
+
+        if groupRows.pauseSeconds(1) > 0
+            localUpdateProgress(cutIndex, leadTarget, "Settling");
+            [wasStopped, wasPaused] = localPauseWithCallbacks(groupRows.pauseSeconds(1));
+            if wasStopped
+                result = localRunResult("stopped", cutIndex, leadTarget, cutIndex - 1);
+                return;
+            end
+            if wasPaused
+                result = localRunResult("paused", cutIndex, leadTarget, cutIndex - 1);
+                return;
+            end
+        end
 
         lw_set_laser_power(state, groupRows.power(1));
         wasStopped = localRunCutStream(groupRows, leadTarget, startTarget, exitTarget);
@@ -92,17 +109,6 @@ try
             return;
         end
 
-        if cutIndex < groupCount
-            [wasStopped, wasPaused] = localPauseWithCallbacks(groupRows.pauseSeconds(1));
-            if wasStopped
-                result = localRunResult("stopped", cutIndex + 1, exitTarget, cutIndex);
-                return;
-            end
-            if wasPaused
-                result = localRunResult("paused", cutIndex + 1, exitTarget, cutIndex);
-                return;
-            end
-        end
     end
 
     localSafeOutputsOff(true);
@@ -131,15 +137,15 @@ end
             end
 
             localAppendSegment(streams, leadTarget, startTarget, groupRows.leadSpeed(1));
-            localAppendTriggerState(streams.(triggerAxisName), triggerChannel, true);
+            localAppendTriggerState(streams.(triggerAxisName), triggerChannel, true, config);
             for iSegment = 1:height(groupRows)
                 segmentStart = localRowTarget(groupRows(iSegment, :), "start");
                 segmentEnd = localRowTarget(groupRows(iSegment, :), "end");
                 localAppendSegment(streams, segmentStart, segmentEnd, groupRows.scanSpeed(iSegment));
             end
-            localAppendTriggerState(streams.(triggerAxisName), triggerChannel, false);
+            localAppendTriggerState(streams.(triggerAxisName), triggerChannel, false, config);
             localAppendSegment(streams, localRowTarget(groupRows(end, :), "end"), exitTarget, groupRows.leadSpeed(1));
-            localAppendTriggerState(streams.(triggerAxisName), triggerChannel, false);
+            localAppendTriggerState(streams.(triggerAxisName), triggerChannel, false, config);
 
             streamFields = fieldnames(streams);
             for fieldIndex = 1:numel(streamFields)
@@ -215,7 +221,8 @@ end
                 wasPaused = true;
                 return;
             end
-            pause(0.02);
+            remainingSeconds = seconds - toc(timerStart);
+            pause(max(min(remainingSeconds, 0.02), 0));
         end
     end
 
@@ -277,12 +284,8 @@ end
 streamHandle.wait(durationSeconds, zaber.motion.Units.TIME_SECONDS);
 end
 
-function localAppendTriggerState(streamHandle, channelNumber, isActive)
-if isActive
-    action = zaber.motion.ascii.DigitalOutputAction.ON;
-else
-    action = zaber.motion.ascii.DigitalOutputAction.OFF;
-end
+function localAppendTriggerState(streamHandle, channelNumber, isActive, config)
+action = lw_stage_pulse_trigger_action(isActive, config);
 streamHandle.setDigitalOutput(channelNumber, action);
 end
 

@@ -361,18 +361,16 @@ end
 if isfield(preflight, 'trajectory')
     manifest.trajectory = trajectorySummary(preflight.trajectory, config);
 end
-if isfield(preflight, 'pauseSeconds')
-    manifest.point = struct( ...
-        'pauseSeconds', preflight.pauseSeconds, ...
-        'exposureTimeSeconds', preflight.exposureTimeSeconds, ...
-        'exposureMicroseconds', preflight.exposureMicroseconds);
+if isfield(preflight, 'pointTiming')
+    manifest.point = preflight.pointTiming;
 end
 if isfield(preflight, 'pulseSpeedMmPerSecond')
     manifest.stream = struct( ...
         'pulseSpeedMmPerSecond', preflight.pulseSpeedMmPerSecond, ...
         'powerPercent', preflight.powerPercent, ...
         'ttlGateWidthUs', preflight.ttlGateWidthUs, ...
-        'maxLaserRepetitionRateKHz', preflight.maxLaserRepetitionRateKHz, ...
+        'inverseGatePeriodKHz', preflight.inverseGatePeriodKHz, ...
+        'pulseSemantics', 'unsynchronized_level_gate', ...
         'maxTriggerRateHz', preflight.maxTriggerRateHz, ...
         'requiredTriggerRateHz', preflight.requiredTriggerRateHz, ...
         'minIntervalSeconds', preflight.minIntervalSeconds);
@@ -434,6 +432,12 @@ summary.z = valueRange(traj.z);
 if isfield(traj, 'power')
     summary.powerPercent = valueRange(traj.power);
 end
+if isfield(traj, 'dwellSeconds')
+    summary.dwellSeconds = valueRange(traj.dwellSeconds);
+end
+if isfield(traj, 'preWritePauseSeconds')
+    summary.preWritePauseSeconds = valueRange(traj.preWritePauseSeconds);
+end
 if summary.pointCount > 0
     summary.firstPoint = trajectoryPoint(traj, 1, config);
     summary.lastPoint = trajectoryPoint(traj, summary.pointCount, config);
@@ -447,9 +451,17 @@ point = struct( ...
     'yStage', traj.y(index), ...
     'yDisplay', yDisplayFromStage(traj.y(index), config), ...
     'z', traj.z(index), ...
-    'powerPercent', NaN);
+    'powerPercent', NaN, ...
+    'dwellSeconds', NaN, ...
+    'preWritePauseSeconds', NaN);
 if isfield(traj, 'power') && numel(traj.power) >= index
     point.powerPercent = traj.power(index);
+end
+if isfield(traj, 'dwellSeconds') && numel(traj.dwellSeconds) >= index
+    point.dwellSeconds = traj.dwellSeconds(index);
+end
+if isfield(traj, 'preWritePauseSeconds') && numel(traj.preWritePauseSeconds) >= index
+    point.preWritePauseSeconds = traj.preWritePauseSeconds(index);
 end
 end
 
@@ -615,6 +627,15 @@ powerValues = nan(pointCount, 1);
 if isfield(traj, 'power') && numel(traj.power) == pointCount
     powerValues = traj.power(:);
 end
+dwellSeconds = nan(pointCount, 1);
+if isfield(traj, 'dwellSeconds') && numel(traj.dwellSeconds) == pointCount
+    dwellSeconds = traj.dwellSeconds(:);
+end
+preWritePauseSeconds = nan(pointCount, 1);
+if isfield(traj, 'preWritePauseSeconds') && ...
+        numel(traj.preWritePauseSeconds) == pointCount
+    preWritePauseSeconds = traj.preWritePauseSeconds(:);
+end
 
 index = (1:pointCount).';
 x = traj.x(:);
@@ -623,7 +644,9 @@ yDisplay = yDisplayFromStage(yStage, config);
 z = traj.z(:);
 powerPercent = powerValues(:);
 snapshotTable = table(index, x, yStage, yDisplay, z, powerPercent, ...
-    'VariableNames', {'Index', 'X', 'YStage', 'YDisplay', 'Z', 'PowerPercent'});
+    dwellSeconds, preWritePauseSeconds, ...
+    'VariableNames', {'Index', 'X', 'YStage', 'YDisplay', 'Z', 'PowerPercent', ...
+    'DwellSeconds', 'PreWritePauseSeconds'});
 writetable(snapshotTable, outputPath);
 end
 
