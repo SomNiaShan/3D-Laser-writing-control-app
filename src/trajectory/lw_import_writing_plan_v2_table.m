@@ -68,7 +68,7 @@ writingPlan = table( ...
 
 if any(pointMask)
     localValidatePointPlan(writingPlan);
-    modeSupport = "point+stream";
+    modeSupport = "point";
     pointCount = rowCount;
     pathGroupCount = 0;
 else

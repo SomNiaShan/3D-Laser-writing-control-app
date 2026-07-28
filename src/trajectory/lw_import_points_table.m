@@ -44,7 +44,7 @@ meta = struct( ...
 if useFixedPower
     meta.fixedPowerPercent = fixedPower;
 end
-trajectory = lw_make_trajectory(x, y, z, power, "imported_points", "point+stream", meta);
+trajectory = lw_make_trajectory(x, y, z, power, "imported_points", "point", meta);
 end
 
 function [useFixedPower, fixedPower] = localFixedPowerOptions(useFixedPower, fixedPower)

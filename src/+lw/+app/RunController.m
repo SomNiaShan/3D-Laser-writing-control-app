@@ -1,5 +1,5 @@
 classdef RunController < handle
-    %RUNCONTROLLER Orchestrate preflight, run modes, pause/resume, and recovery.
+    %RUNCONTROLLER Execute prepared plans with preflight, pause, and recovery.
 
     properties (SetAccess = private)
         Model
@@ -38,12 +38,6 @@ classdef RunController < handle
             if ~obj.Model.State.isBusy || obj.Model.State.pauseRequested
                 return;
             end
-            if obj.selectedRunMode() == "Stream Mode"
-                obj.Ports.logMessage('Pause is not available in Stream Mode; use STOP for a safe shutdown.');
-                obj.Ports.syncAll();
-                return;
-            end
-
             obj.Model.State.pauseRequested = true;
             obj.Model.RunCurrentText = obj.formatRunStatusWithCurrentPosition("Pause requested - finishing current step");
             obj.Ports.logMessage('Pause requested; finishing the current safe step before pausing.');
@@ -65,12 +59,11 @@ classdef RunController < handle
         end
 
         function startRunImpl(obj)
+            obj.requirePreparedPlan();
             runMode = obj.selectedRunMode();
             switch runMode
                 case "Point Mode"
                     preflight = obj.buildPointRunPreflight();
-                case "Stream Mode"
-                    preflight = obj.buildPulseRunPreflight();
                 case "Z Sweep Mode"
                     preflight = obj.buildZSweepRunPreflight();
                 case "Path Plan Mode"
@@ -212,18 +205,6 @@ classdef RunController < handle
                     [obj.Model.State, pointResult] = obj.Model.Services.execution.runPoint( ...
                         obj.Model.State, obj.Model.Config, preflight.trajectory, options);
                     runResult = obj.runResultFromPoint(preflight, pointResult);
-
-                case "Stream Mode"
-                    obj.Ports.logMessage(sprintf('Stream mode started with %d points at %.3f mm/s.', ...
-                        numel(preflight.trajectory.x), preflight.pulseSpeedMmPerSecond));
-                    options.motion = preflight.motion;
-                    options.targetSpeedMmPerSecond = preflight.pulseSpeedMmPerSecond;
-                    options.powerPercent = preflight.powerPercent;
-                    options.ttlGateWidthUs = preflight.ttlGateWidthUs;
-                    options.pulseTimesSeconds = preflight.pulseTimesSeconds;
-                    obj.Model.State = obj.Model.Services.execution.runStream( ...
-                        obj.Model.State, obj.Model.Config, preflight.trajectory, options);
-                    runResult = obj.makeRunResult(ternary(obj.Model.State.stopRequested, "stopped", "finished"), obj.localCurrentRunTarget(), []);
 
                 case "Z Sweep Mode"
                     options.laserStateFcn = @(isOn) obj.Ports.stageLaser.setLaserState(isOn);
@@ -651,7 +632,7 @@ classdef RunController < handle
         end
 
         function goToFirstPointImpl(obj)
-            obj.requireTrajectoryLoaded();
+            obj.requireTrajectoryPlan();
             obj.Ports.stageLaser.requireStagesConnected();
 
             target = obj.firstRunTargetForCurrentMode();
@@ -660,24 +641,26 @@ classdef RunController < handle
         end
 
         function target = firstRunTargetForCurrentMode(obj)
+            trajectory = obj.Model.PreparedPlan.trajectory;
             if obj.selectedRunMode() == "Path Plan Mode" && ...
-                    isfield(obj.Model.Trajectory, 'writingPlan') && ...
-                    istable(obj.Model.Trajectory.writingPlan) && ...
-                    any(string(obj.Model.Trajectory.writingPlan.operation) == "path")
-                pathRows = obj.Model.Trajectory.writingPlan( ...
-                    string(obj.Model.Trajectory.writingPlan.operation) == "path", :);
+                    isfield(trajectory, 'writingPlan') && ...
+                    istable(trajectory.writingPlan) && ...
+                    any(string(trajectory.writingPlan.operation) == "path")
+                pathRows = trajectory.writingPlan( ...
+                    string(trajectory.writingPlan.operation) == "path", :);
                 target = struct( ...
                     'x', pathRows.x(1), 'y', pathRows.y(1), 'z', pathRows.z(1));
                 return;
             end
 
-            target = trajectoryTargetAtIndex(obj.Model.Trajectory, 1);
+            target = trajectoryTargetAtIndex(trajectory, 1);
         end
 
         function checkBoundsImpl(obj)
-            obj.requireTrajectoryLoaded();
+            obj.requireTrajectoryPlan();
 
-            analysis = obj.analyzeTrajectoryForExecution(obj.Model.Trajectory);
+            analysis = obj.analyzeTrajectoryForExecution( ...
+                obj.Model.PreparedPlan.trajectory);
             summaryText = lw_build_bounds_summary_text(analysis);
             obj.Model.RunProgressText = "Bounds analysis";
             obj.Model.RunCurrentText = obj.formatRunStatusWithCurrentPosition(ternary(analysis.inBounds, 'Bounds ready', 'Bounds out of limits'));
@@ -708,31 +691,22 @@ classdef RunController < handle
         end
 
         function preflight = buildPointRunPreflight(obj)
-            obj.requireTrajectoryLoaded();
+            obj.requirePreparedPlan("point");
             obj.Ports.stageLaser.requireStagesConnected();
             obj.Ports.stageLaser.requireDAQConnected();
 
-            if obj.selectedRunMode() ~= "Point Mode"
-                error('Select Point Mode to run point-by-point exposure.');
-            end
-            if ~supportsMode(obj.Model.Trajectory, "point")
-                error('The current plan only supports %s.', char(obj.Model.Trajectory.modeSupport));
+            plan = obj.Model.PreparedPlan;
+            if ~supportsMode(plan.trajectory, "point")
+                error('The current plan only supports %s.', ...
+                    char(plan.trajectory.modeSupport));
             end
 
             preflight = struct();
             preflight.motion = obj.Ports.stageLaser.readAbsoluteMotion();
-            if trajectoryHasPerPointTiming(obj.Model.Trajectory)
-                defaultDwellSeconds = obj.Model.Config.execution.pointExposureTime;
-                defaultSettleSeconds = obj.Model.Config.execution.pointPause;
-            else
-                defaultDwellSeconds = positiveDurationMicroseconds( ...
-                    obj.Model.Ui.PointExposureField.Value, 'Default point dwell');
-                defaultSettleSeconds = nonnegativeScalar( ...
-                    obj.Model.Ui.PointPauseField.Value, 'Default pre-write settle');
-            end
             [preflight.trajectory, preflight.pointTiming] = ...
-                lw_prepare_point_run_trajectory(obj.Model.Trajectory, ...
-                defaultDwellSeconds, defaultSettleSeconds, obj.Model.Config);
+                lw_prepare_point_run_trajectory(plan.trajectory, ...
+                plan.defaultDwellSeconds, plan.defaultSettleSeconds, ...
+                obj.Model.Config);
             preflight.analysis = obj.analyzeTrajectoryForExecution(preflight.trajectory);
             obj.validateTrajectoryForRun(preflight.trajectory);
             preflight.carbideSnapshot = obj.Ports.carbide.currentCarbideSnapshot();
@@ -742,58 +716,21 @@ classdef RunController < handle
                 formatCarbideSnapshot(preflight.carbideSnapshot), obj.Ports.carbide.autoStandbyAfterRunSummaryText());
         end
 
-        function preflight = buildPulseRunPreflight(obj)
-            obj.requireTrajectoryLoaded();
-            obj.Ports.stageLaser.requireStagesConnected();
-            obj.Ports.stageLaser.requireDAQConnected();
-
-            if obj.selectedRunMode() ~= "Stream Mode"
-                error('Select Stream Mode to run a stream-capable plan during continuous motion.');
-            end
-            if ~supportsMode(obj.Model.Trajectory, "stream")
-                error('The current plan does not support Stream Mode.');
-            end
-            preflight = struct();
-            preflight.motion = obj.Ports.stageLaser.readAbsoluteMotion();
-            preflight.pulseSpeedMmPerSecond = positiveScalar(obj.Model.Ui.StreamSpeedField.Value, 'Stream speed');
-            preflight.powerPercent = trajectoryConstantPower(obj.Model.Trajectory);
-            preflight.ttlGateWidthUs = obj.configuredTtlGateWidthUs();
-            preflight.inverseGatePeriodKHz = 1000 / preflight.ttlGateWidthUs;
-            preflight.maxTriggerRateHz = obj.configuredMaxPulseTriggerRateHz();
-            preflight.trajectory = obj.Model.Trajectory;
-            preflight.analysis = obj.analyzeTrajectoryForExecution(preflight.trajectory);
-            obj.validateTrajectoryForRun(preflight.trajectory);
-            pulseAnalysis = analyzePulseTrajectory( ...
-                preflight.trajectory, ...
-                preflight.pulseSpeedMmPerSecond, ...
-                preflight.ttlGateWidthUs, ...
-                preflight.maxTriggerRateHz);
-            preflight.pulseTimesSeconds = pulseAnalysis.pulseTimesSeconds;
-            preflight.requiredTriggerRateHz = pulseAnalysis.requiredTriggerRateHz;
-            preflight.minIntervalSeconds = pulseAnalysis.minIntervalSeconds;
-            preflight.carbideSnapshot = obj.Ports.carbide.currentCarbideSnapshot();
-            preflight.summaryText = lw_build_pulse_run_preflight_summary_text( ...
-                preflight, obj.selectedRunMode(), obj.Ports.stageLaser.areStagesConnected(), obj.Ports.stageLaser.areDAQConnected(), ...
-                formatCarbideSnapshot(preflight.carbideSnapshot), obj.Ports.carbide.autoStandbyAfterRunSummaryText());
-        end
-
         function preflight = buildPathPlanRunPreflight(obj)
-            obj.requireTrajectoryLoaded();
+            obj.requirePreparedPlan("path");
             obj.Ports.stageLaser.requireStagesConnected();
             obj.Ports.stageLaser.requireDAQConnected();
 
-            if obj.selectedRunMode() ~= "Path Plan Mode"
-                error('Select Path Plan Mode to run writing-plan path segments.');
-            end
-            if ~supportsMode(obj.Model.Trajectory, "path")
+            plan = obj.Model.PreparedPlan;
+            if ~supportsMode(plan.trajectory, "path")
                 error('The current plan does not contain path segments.');
             end
-            if ~isfield(obj.Model.Trajectory, 'writingPlan') || ...
-                    ~istable(obj.Model.Trajectory.writingPlan)
+            if ~isfield(plan.trajectory, 'writingPlan') || ...
+                    ~istable(plan.trajectory.writingPlan)
                 error('Path Plan Mode requires a writing plan imported from CSV.');
             end
 
-            operations = string(obj.Model.Trajectory.writingPlan.operation);
+            operations = string(plan.trajectory.writingPlan.operation);
             if any(operations ~= "path")
                 error(['Path Plan Mode requires every writing-plan row ', ...
                     'to use operation=path.']);
@@ -801,7 +738,7 @@ classdef RunController < handle
 
             preflight = struct();
             preflight.motion = obj.Ports.stageLaser.readAbsoluteMotion();
-            preflight.trajectory = obj.Model.Trajectory;
+            preflight.trajectory = plan.trajectory;
             preflight.writingPlan = preflight.trajectory.writingPlan;
             preflight.pathGroups = lw_validate_path_plan_for_run(preflight.writingPlan);
             preflight.progressTotal = numel(preflight.pathGroups);
@@ -814,205 +751,41 @@ classdef RunController < handle
         end
 
         function preflight = buildZSweepRunPreflight(obj)
+            obj.requirePreparedPlan("z_sweep");
             obj.Ports.stageLaser.requireStagesConnected();
             obj.Ports.stageLaser.requireDAQConnected();
 
-            if obj.selectedRunMode() ~= "Z Sweep Mode"
-                error('Select Z Sweep Mode to run repeated direct Z sweeps.');
-            end
-
             motion = obj.Ports.stageLaser.readAbsoluteMotion();
-            sweep = struct();
-            sweep.x = finiteScalar(obj.Model.Ui.ZSweepXField.Value, 'Z Sweep X');
-            sweep.displayY = finiteScalar(obj.Model.Ui.ZSweepYField.Value, 'Z Sweep Y');
-            sweep.y = obj.Ports.displayYToStage(sweep.displayY);
-            sweep.zBack = finiteScalar(obj.Model.Ui.ZSweepBackField.Value, 'Z Sweep Z Back');
-            sweep.zFront = finiteScalar(obj.Model.Ui.ZSweepFrontField.Value, 'Z Sweep Z Front');
-            sweep.repeatCount = positiveInteger(obj.Model.Ui.ZSweepRepeatField.Value, 'Z Sweep repeat count');
-            sweep.sweepSpeedMmPerSecond = positiveScalar(obj.Model.Ui.ZSweepSpeedField.Value, 'Z Sweep speed');
-            sweep.returnSpeedMmPerSecond = positiveScalar(obj.Model.Ui.ZSweepReturnSpeedField.Value, 'Z Sweep return speed');
-            sweep.powerPercent = validatePowerPercent(obj.Model.Ui.ZSweepPowerField.Value, 'Z Sweep power');
-            sweep.exposureDirection = string(obj.Model.Ui.ZSweepDirectionDropDown.Value);
-            sweep.preMoveMotion = motion;
-            sweep.zAcceleration = motion.acceleration.z;
-            sweep.pollIntervalSeconds = 0.05;
-
-            if abs(sweep.zFront - sweep.zBack) <= 1e-9
-                error('Z Sweep cancelled: Z Back and Z Front must be different.');
-            end
-
-            obj.Ports.validateTargetForUi(struct('x', sweep.x, 'y', sweep.y, 'z', sweep.zBack), 'Z Sweep');
-            obj.Ports.validateTargetForUi(struct('x', sweep.x, 'y', sweep.y, 'z', sweep.zFront), 'Z Sweep');
+            plan = obj.Model.PreparedPlan;
+            sweep = obj.sweepWithRunMotion(plan.sweep, motion);
 
             preflight = struct();
             preflight.sweep = sweep;
             preflight.carbideSnapshot = obj.Ports.carbide.currentCarbideSnapshot();
-            if obj.Model.Ui.ZSweepMatrixCheckBox.Value
-                preflight.matrix = obj.buildZSweepMatrix(sweep);
-                preflight.sweepJobs = preflight.matrix.runs;
-                preflight.exposedSweepCount = preflight.matrix.exposedSweepCount;
-                preflight.progressTotal = preflight.matrix.progressTotal;
+            preflight.sweepJobs = plan.sweepJobs;
+            for jobIndex = 1:numel(preflight.sweepJobs)
+                preflight.sweepJobs(jobIndex).sweep = obj.sweepWithRunMotion( ...
+                    preflight.sweepJobs(jobIndex).sweep, motion);
+            end
+            preflight.exposedSweepCount = plan.exposedSweepCount;
+            preflight.progressTotal = plan.progressTotal;
+            if plan.isMatrix
+                preflight.matrix = plan.matrix;
+                preflight.matrix.runs = preflight.sweepJobs;
                 preflight.summaryText = lw_build_z_sweep_matrix_preflight_summary_text( ...
                     preflight, obj.Ports.stageLaser.areStagesConnected(), obj.Ports.stageLaser.areDAQConnected(), ...
                     formatCarbideSnapshot(preflight.carbideSnapshot), obj.Ports.carbide.autoStandbyAfterRunSummaryText());
             else
-                preflight.sweepJobs = singleZSweepJob(sweep);
-                preflight.exposedSweepCount = zSweepExposedSweepCount(sweep);
-                preflight.progressTotal = zSweepProgressTotal(sweep);
                 preflight.summaryText = lw_build_z_sweep_preflight_summary_text( ...
                     preflight, obj.Ports.stageLaser.areStagesConnected(), obj.Ports.stageLaser.areDAQConnected(), ...
                     formatCarbideSnapshot(preflight.carbideSnapshot), obj.Ports.carbide.autoStandbyAfterRunSummaryText());
             end
         end
 
-        function matrix = buildZSweepMatrix(obj, baseSweep)
-            xParameter = string(obj.Model.Ui.ZSweepMatrixXParamDropDown.Value);
-            yParameter = string(obj.Model.Ui.ZSweepMatrixYParamDropDown.Value);
-            xValues = zSweepMatrixParameterValues(xParameter, obj.Model.Ui.ZSweepMatrixXValuesField.Value);
-            yValues = zSweepMatrixParameterValues(yParameter, obj.Model.Ui.ZSweepMatrixYValuesField.Value);
-            pitchX = positiveScalar(obj.Model.Ui.ZSweepPitchXField.Value, 'Z Sweep matrix pitch X');
-            pitchY = positiveScalar(obj.Model.Ui.ZSweepPitchYField.Value, 'Z Sweep matrix pitch Y');
-            blockConfig = obj.zSweepMatrixBlockConfig();
-            validateUniqueZSweepMatrixParameters([xParameter, yParameter, blockConfig.parameters]);
-
-            runCount = numel(xValues) * numel(yValues) * blockConfig.count;
-            runs = repmat(struct( ...
-                'index', 0, ...
-                'xIndex', 0, ...
-                'yIndex', 0, ...
-                'blockIndex', 0, ...
-                'blockColumn', 1, ...
-                'blockRow', 1, ...
-                'xValueText', "", ...
-                'yValueText', "", ...
-                'blockText', "", ...
-                'sweep', baseSweep), runCount, 1);
-
-            runIndex = 0;
-            progressTotal = 0;
-            exposedSweepCount = 0;
-            for blockIndex = 1:blockConfig.count
-                blockColumn = mod(blockIndex - 1, blockConfig.columns) + 1;
-                blockRow = floor((blockIndex - 1) / blockConfig.columns) + 1;
-                for yIndex = 1:numel(yValues)
-                    for xIndex = 1:numel(xValues)
-                        runIndex = runIndex + 1;
-                        runSweep = baseSweep;
-                        runSweep = applyZSweepBlockParameters(runSweep, blockConfig, blockColumn, blockRow);
-                        runSweep = applyZSweepMatrixParameter(runSweep, xParameter, xValues(xIndex));
-                        runSweep = applyZSweepMatrixParameter(runSweep, yParameter, yValues(yIndex));
-                        runSweep.powerPercent = validatePowerPercent(runSweep.powerPercent, 'Z Sweep matrix power');
-                        runSweep.x = baseSweep.x + (blockColumn - 1) * blockConfig.pitchX + (xIndex - 1) * pitchX;
-                        runSweep.displayY = baseSweep.displayY + (blockRow - 1) * blockConfig.pitchY + (yIndex - 1) * pitchY;
-                        runSweep.y = obj.Ports.displayYToStage(runSweep.displayY);
-
-                        obj.Ports.validateTargetForUi(struct('x', runSweep.x, 'y', runSweep.y, 'z', runSweep.zBack), 'Z Sweep matrix');
-                        obj.Ports.validateTargetForUi(struct('x', runSweep.x, 'y', runSweep.y, 'z', runSweep.zFront), 'Z Sweep matrix');
-
-                        runs(runIndex) = struct( ...
-                            'index', runIndex, ...
-                            'xIndex', xIndex, ...
-                            'yIndex', yIndex, ...
-                            'blockIndex', blockIndex, ...
-                            'blockColumn', blockColumn, ...
-                            'blockRow', blockRow, ...
-                            'xValueText', zSweepMatrixValueText(xParameter, xValues(xIndex)), ...
-                            'yValueText', zSweepMatrixValueText(yParameter, yValues(yIndex)), ...
-                            'blockText', zSweepBlockText(blockConfig, blockIndex), ...
-                            'sweep', runSweep);
-                        progressTotal = progressTotal + zSweepProgressTotal(runSweep);
-                        exposedSweepCount = exposedSweepCount + zSweepExposedSweepCount(runSweep);
-                    end
-                end
-            end
-
-            runXValues = arrayfun(@(run) run.sweep.x, runs);
-            displayYValues = arrayfun(@(run) run.sweep.displayY, runs);
-            matrix = struct( ...
-                'xParameter', xParameter, ...
-                'yParameter', yParameter, ...
-                'xValues', xValues, ...
-                'yValues', yValues, ...
-                'pitchX', pitchX, ...
-                'pitchY', pitchY, ...
-                'block', blockConfig, ...
-                'rows', numel(yValues), ...
-                'columns', numel(xValues), ...
-                'runCount', runCount, ...
-                'runs', runs, ...
-                'xRange', [min(runXValues), max(runXValues)], ...
-                'displayYRange', [min(displayYValues), max(displayYValues)], ...
-                'progressTotal', progressTotal, ...
-                'exposedSweepCount', exposedSweepCount);
-        end
-
-        function blockConfig = zSweepMatrixBlockConfig(obj)
-            if ~obj.Model.Ui.ZSweepBlockCheckBox.Value
-                blockConfig = struct( ...
-                    'enabled', false, ...
-                    'xParameter', "None", ...
-                    'yParameter', "None", ...
-                    'xValues', [], ...
-                    'yValues', [], ...
-                    'parameters', strings(1, 0), ...
-                    'values', {{}}, ...
-                    'count', 1, ...
-                    'columns', 1, ...
-                    'rows', 1, ...
-                    'pitchX', 0, ...
-                    'pitchY', 0);
-                return;
-            end
-
-            xParameter = string(obj.Model.Ui.ZSweepBlockParam1DropDown.Value);
-            yParameter = string(obj.Model.Ui.ZSweepBlockParam2DropDown.Value);
-            xValues = [];
-            yValues = [];
-            selectedParameters = strings(1, 0);
-            selectedValues = {};
-
-            if xParameter ~= "None"
-                xValues = zSweepMatrixParameterValues(xParameter, obj.Model.Ui.ZSweepBlockValues1Field.Value);
-                selectedParameters(end + 1) = xParameter;
-                selectedValues{end + 1} = xValues;
-            end
-
-            if yParameter ~= "None"
-                yValues = zSweepMatrixParameterValues(yParameter, obj.Model.Ui.ZSweepBlockValues2Field.Value);
-                selectedParameters(end + 1) = yParameter;
-                selectedValues{end + 1} = yValues;
-            end
-
-            if isempty(selectedParameters)
-                error('Z Sweep matrix blocks are enabled, but no block parameter is selected.');
-            end
-
-            if xParameter == "None"
-                blockColumns = 1;
-            else
-                blockColumns = numel(xValues);
-            end
-
-            if yParameter == "None"
-                blockRows = 1;
-            else
-                blockRows = numel(yValues);
-            end
-            blockCount = blockColumns * blockRows;
-
-            blockConfig = struct( ...
-                'enabled', true, ...
-                'xParameter', xParameter, ...
-                'yParameter', yParameter, ...
-                'xValues', xValues, ...
-                'yValues', yValues, ...
-                'parameters', selectedParameters, ...
-                'values', {selectedValues}, ...
-                'count', blockCount, ...
-                'columns', blockColumns, ...
-                'rows', blockRows, ...
-                'pitchX', positiveScalar(obj.Model.Ui.ZSweepBlockPitchXField.Value, 'Z Sweep block pitch X'), ...
-                'pitchY', positiveScalar(obj.Model.Ui.ZSweepBlockPitchYField.Value, 'Z Sweep block pitch Y'));
+        function sweep = sweepWithRunMotion(~, sweep, motion)
+            sweep.preMoveMotion = motion;
+            sweep.zAcceleration = motion.acceleration.z;
+            sweep.pollIntervalSeconds = 0.05;
         end
 
         function executeMotionTargetsNoLaser(obj, actionLabel, targets, statusPrefix)
@@ -1101,11 +874,6 @@ classdef RunController < handle
                         target.x, target.y, target.z, index, total);
                     obj.Model.State.currentPosition = target;
                     obj.Ports.syncPositionFields();
-                case "Stream"
-                    obj.Model.RunCurrentText = sprintf('X %.3f | Y %.3f | Z %.3f | Stream %d/%d', ...
-                        target.x, target.y, target.z, index, total);
-                    obj.Model.State.currentPosition = target;
-                    obj.Ports.syncPositionFields();
                 case "Cut"
                     obj.Model.RunCurrentText = sprintf('X %.3f | Y %.3f | Z %.3f | Cut %d/%d complete', ...
                         target.x, obj.Ports.stageYToDisplay(target.y), target.z, index, total);
@@ -1149,9 +917,6 @@ classdef RunController < handle
                     phaseFraction = 0.5;
                 case "Exposing"
                     phaseFraction = 0.75;
-                case "Stream"
-                    completedUnits = index;
-                    return;
                 case "Cut"
                     completedUnits = index;
                     return;
@@ -1173,112 +938,27 @@ classdef RunController < handle
         end
 
         function syncRunStatus(obj)
-            if obj.selectedRunMode() == "Z Sweep Mode"
-                if obj.Model.Ui.ZSweepMatrixCheckBox.Value
-                    obj.Model.Ui.RunSourceField.Value = 'Z Sweep Matrix';
-                    obj.Model.Ui.RunSupportedField.Value = 'Power x speed grid';
-                else
-                    obj.Model.Ui.RunSourceField.Value = 'Z Sweep';
-                    obj.Model.Ui.RunSupportedField.Value = 'Direct Z motion';
-                end
-            elseif isempty(obj.Model.Trajectory)
+            if isempty(obj.Model.PreparedPlan)
+                obj.Model.Ui.RunPlanTypeField.Value = 'None';
                 obj.Model.Ui.RunSourceField.Value = 'None';
-                obj.Model.Ui.RunSupportedField.Value = '-';
+                obj.Model.Ui.RunSupportedField.Value = 'Prepare a plan on the Plan tab';
             else
-                obj.Model.Ui.RunSourceField.Value = char(obj.Model.Trajectory.sourceType);
-                obj.Model.Ui.RunSupportedField.Value = char(obj.Model.Trajectory.modeSupport);
+                plan = obj.Model.PreparedPlan;
+                obj.Model.Ui.RunPlanTypeField.Value = char(obj.planTypeText(plan));
+                obj.Model.Ui.RunSourceField.Value = char(string(plan.sourceType));
+                if obj.Model.TrajectoryInputsDirty
+                    obj.Model.Ui.RunSupportedField.Value = ...
+                        'Inputs changed - prepare again';
+                else
+                    obj.Model.Ui.RunSupportedField.Value = ...
+                        'Ready - execution derived from plan';
+                end
             end
             obj.Model.Ui.RunProgressField.Value = char(obj.Model.RunProgressText);
             obj.Model.Ui.RunCurrentField.Value = char(obj.Model.RunCurrentText);
         end
 
-        function syncRunParameterUi(obj)
-            pointControls = { ...
-                obj.Model.Ui.PointExposureLabel, obj.Model.Ui.PointExposureField, ...
-                obj.Model.Ui.PointPauseLabel, obj.Model.Ui.PointPauseField};
-            streamControls = { ...
-                obj.Model.Ui.StreamSpeedLabel, obj.Model.Ui.StreamSpeedField, ...
-                obj.Model.Ui.TTLGateWidthLabel, obj.Model.Ui.TTLGateWidthField};
-            zSweepControls = { ...
-                obj.Model.Ui.ZSweepPowerLabel, obj.Model.Ui.ZSweepPowerField, ...
-                obj.Model.Ui.ZSweepDirectionLabel, obj.Model.Ui.ZSweepDirectionDropDown, ...
-                obj.Model.Ui.ZSweepXLabel, obj.Model.Ui.ZSweepXField, ...
-                obj.Model.Ui.ZSweepYLabel, obj.Model.Ui.ZSweepYField, ...
-                obj.Model.Ui.ZSweepBackLabel, obj.Model.Ui.ZSweepBackField, ...
-                obj.Model.Ui.ZSweepFrontLabel, obj.Model.Ui.ZSweepFrontField, ...
-                obj.Model.Ui.ZSweepSpeedLabel, obj.Model.Ui.ZSweepSpeedField, ...
-                obj.Model.Ui.ZSweepReturnSpeedLabel, obj.Model.Ui.ZSweepReturnSpeedField, ...
-                obj.Model.Ui.ZSweepRepeatLabel, obj.Model.Ui.ZSweepRepeatField, ...
-                obj.Model.Ui.ZSweepUseCurrentButton, ...
-                obj.Model.Ui.ZSweepMatrixCheckBox, obj.Model.Ui.ZSweepMatrixHintLabel, ...
-                obj.Model.Ui.ZSweepMatrixXParamLabel, obj.Model.Ui.ZSweepMatrixXParamDropDown, ...
-                obj.Model.Ui.ZSweepMatrixYParamLabel, obj.Model.Ui.ZSweepMatrixYParamDropDown, ...
-                obj.Model.Ui.ZSweepMatrixXValuesLabel, obj.Model.Ui.ZSweepMatrixXValuesField, ...
-                obj.Model.Ui.ZSweepMatrixYValuesLabel, obj.Model.Ui.ZSweepMatrixYValuesField, ...
-                obj.Model.Ui.ZSweepPitchXLabel, obj.Model.Ui.ZSweepPitchXField, ...
-                obj.Model.Ui.ZSweepPitchYLabel, obj.Model.Ui.ZSweepPitchYField, ...
-                obj.Model.Ui.ZSweepBlockCheckBox, obj.Model.Ui.ZSweepBlockHintLabel, ...
-                obj.Model.Ui.ZSweepBlockParam1Label, obj.Model.Ui.ZSweepBlockParam1DropDown, ...
-                obj.Model.Ui.ZSweepBlockValues1Label, obj.Model.Ui.ZSweepBlockValues1Field, ...
-                obj.Model.Ui.ZSweepBlockParam2Label, obj.Model.Ui.ZSweepBlockParam2DropDown, ...
-                obj.Model.Ui.ZSweepBlockValues2Label, obj.Model.Ui.ZSweepBlockValues2Field, ...
-                obj.Model.Ui.ZSweepBlockPitchXLabel, obj.Model.Ui.ZSweepBlockPitchXField, ...
-                obj.Model.Ui.ZSweepBlockPitchYLabel, obj.Model.Ui.ZSweepBlockPitchYField};
-
-            mode = obj.selectedRunMode();
-            setVisibility(pointControls, mode == "Point Mode");
-            setVisibility(streamControls, mode == "Stream Mode");
-            setVisibility(zSweepControls, mode == "Z Sweep Mode");
-            setVisibility(obj.Model.Ui.RunParameterHintLabel, true);
-
-            switch mode
-                case "Point Mode"
-                    rowHeights = repmat({0}, 1, 17);
-                    rowHeights([1, 16, 17]) = {'fit'};
-                    obj.Model.Ui.RunParameterGrid.RowHeight = rowHeights;
-                    if trajectoryHasPerPointTiming(obj.Model.Trajectory)
-                        obj.Model.Ui.RunParameterHintLabel.Text = ...
-                            ['Point Mode uses each writing-plan row''s power, dwell_s, and ', ...
-                            'pre-write pause_s. Default fields are disabled.'];
-                    else
-                        obj.Model.Ui.RunParameterHintLabel.Text = ...
-                            ['Point Mode uses stored point power plus the default dwell and ', ...
-                            'pre-write settle values above.'];
-                    end
-                case "Stream Mode"
-                    rowHeights = repmat({0}, 1, 17);
-                    rowHeights([2, 3, 16, 17]) = {'fit'};
-                    obj.Model.Ui.RunParameterGrid.RowHeight = rowHeights;
-                    obj.Model.Ui.RunParameterHintLabel.Text = ...
-                        ['Stream Mode uses constant plan power and a timed level gate at each point; ', ...
-                        'it does not guarantee one optical pulse per gate.'];
-                case "Path Plan Mode"
-                    rowHeights = repmat({0}, 1, 17);
-                    rowHeights([16, 17]) = {'fit'};
-                    obj.Model.Ui.RunParameterGrid.RowHeight = rowHeights;
-                    obj.Model.Ui.RunParameterHintLabel.Text = ...
-                        ['Path Plan Mode uses each segment''s explicit laser state, ', ...
-                        'speed, and start/end coordinates.'];
-                otherwise
-                    rowHeights = repmat({0}, 1, 17);
-                    rowHeights([2, 3, 4, 5, 6, 7, 8, 16, 17]) = {'fit'};
-                    if obj.Model.Ui.ZSweepMatrixCheckBox.Value
-                        rowHeights(9:12) = {'fit'};
-                        if obj.Model.Ui.ZSweepBlockCheckBox.Value
-                            rowHeights(13:15) = {'fit'};
-                        end
-                    end
-                    obj.Model.Ui.RunParameterGrid.RowHeight = rowHeights;
-                    if obj.Model.Ui.ZSweepMatrixCheckBox.Value
-                        obj.Model.Ui.RunParameterHintLabel.Text = ['Matrix uses selected X/Y parameters; ', ...
-                            'unselected parameters use the single Z Sweep values above. Open the Plan tab to preview.'];
-                    else
-                        obj.Model.Ui.RunParameterHintLabel.Text = 'Z Sweep Mode uses direct repeated Z moves. Open the Plan tab to preview.';
-                    end
-            end
-        end
-
-        function syncPauseResumeButton(obj, isStreamMode)
+        function syncPauseResumeButton(obj)
             if obj.Model.State.isPaused
                 obj.Model.Ui.PauseResumeButton.Text = 'Resume';
                 obj.Model.Ui.PauseResumeButton.Tooltip = 'Return to the paused point and continue the frozen run';
@@ -1290,74 +970,62 @@ classdef RunController < handle
             else
                 obj.Model.Ui.PauseResumeButton.Text = 'Pause';
                 obj.Model.Ui.PauseResumeButton.Tooltip = 'Pause at the next safe point or Z move boundary';
-                setEnable(obj.Model.Ui.PauseResumeButton, obj.Model.State.isBusy && ~isStreamMode);
+                setEnable(obj.Model.Ui.PauseResumeButton, obj.Model.State.isBusy);
             end
         end
 
-        function updateZSweepMatrixParameterEnableStates(obj, isZSweepMatrixEnabled)
-            selectedParameters = strings(1, 0);
-            if isZSweepMatrixEnabled
-                selectedParameters = [ ...
-                    string(obj.Model.Ui.ZSweepMatrixXParamDropDown.Value), ...
-                    string(obj.Model.Ui.ZSweepMatrixYParamDropDown.Value)];
-                if obj.Model.Ui.ZSweepBlockCheckBox.Value
-                    selectedParameters = [selectedParameters, obj.zSweepSelectedBlockParameters()];
-                end
-            end
-
-            obj.setSingleParameterEnableState('Power (%)', ...
-                {obj.Model.Ui.ZSweepPowerLabel, obj.Model.Ui.ZSweepPowerField}, selectedParameters);
-            obj.setSingleParameterEnableState('Sweep Speed (mm/s)', ...
-                {obj.Model.Ui.ZSweepSpeedLabel, obj.Model.Ui.ZSweepSpeedField}, selectedParameters);
-            obj.setSingleParameterEnableState('Return Speed (mm/s)', ...
-                {obj.Model.Ui.ZSweepReturnSpeedLabel, obj.Model.Ui.ZSweepReturnSpeedField}, selectedParameters);
-            obj.setSingleParameterEnableState('Repeat Count', ...
-                {obj.Model.Ui.ZSweepRepeatLabel, obj.Model.Ui.ZSweepRepeatField}, selectedParameters);
-            obj.setSingleParameterEnableState('Exposure Direction', ...
-                {obj.Model.Ui.ZSweepDirectionLabel, obj.Model.Ui.ZSweepDirectionDropDown}, selectedParameters);
-        end
-
-        function setSingleParameterEnableState(obj, parameterName, controls, selectedParameters)
-            isSelectedForMatrix = any(selectedParameters == string(parameterName));
-            setEnable(controls, ~obj.Model.State.isBusy && ~obj.Model.State.isPaused && ~isSelectedForMatrix);
-        end
-
-        function selectedParameters = zSweepSelectedBlockParameters(obj)
-            selectedParameters = strings(1, 0);
-            blockParameters = [ ...
-                string(obj.Model.Ui.ZSweepBlockParam1DropDown.Value), ...
-                string(obj.Model.Ui.ZSweepBlockParam2DropDown.Value)];
-            for blockParameterIndex = 1:numel(blockParameters)
-                if blockParameters(blockParameterIndex) ~= "None"
-                    selectedParameters(end + 1) = blockParameters(blockParameterIndex); %#ok<AGROW>
-                end
-            end
-        end
-
-        function requireTrajectoryLoaded(obj)
-            if isempty(obj.Model.Trajectory)
-                error('No plan is loaded.');
+        function requirePreparedPlan(obj, expectedKind)
+            if isempty(obj.Model.PreparedPlan)
+                error('No plan is prepared. Prepare one on the Plan tab first.');
             end
             if obj.Model.TrajectoryInputsDirty
-                error('Plan power input changed. Regenerate or re-import the plan before running.');
+                error('Plan inputs changed. Prepare the plan again before running.');
+            end
+            if nargin >= 2 && string(obj.Model.PreparedPlan.kind) ~= string(expectedKind)
+                error('Prepared plan type changed unexpectedly. Prepare the plan again.');
+            end
+        end
+
+        function requireTrajectoryPlan(obj)
+            obj.requirePreparedPlan();
+            if ~isfield(obj.Model.PreparedPlan, 'trajectory')
+                error(['The prepared Z Sweep has no point list. ', ...
+                    'Use the Plan preview to inspect its bounds.']);
             end
         end
 
         function mode = selectedRunMode(obj)
-            mode = string(obj.Model.Ui.RunModeGroup.SelectedObject.Text);
-        end
-
-        function value = configuredTtlGateWidthUs(obj)
-            value = positiveScalar(obj.Model.Ui.TTLGateWidthField.Value, 'TTL Gate Width');
-            value = lw_validate_stage_schedule_duration_us( ...
-                value, obj.Model.Config, 'TTL Gate Width', false);
-        end
-
-        function value = configuredMaxPulseTriggerRateHz(obj)
-            if ~isfield(obj.Model.Config, 'stage') || ~isfield(obj.Model.Config.stage, 'maxPulseTriggerRateHz')
-                error('Max Trigger Rate is not configured. Set config.stage.maxPulseTriggerRateHz in lw_hardware_config.m.');
+            if isempty(obj.Model.PreparedPlan)
+                mode = "No Plan";
+                return;
             end
-            value = positiveScalar(obj.Model.Config.stage.maxPulseTriggerRateHz, 'Max Trigger Rate');
+            switch string(obj.Model.PreparedPlan.kind)
+                case "point"
+                    mode = "Point Mode";
+                case "path"
+                    mode = "Path Plan Mode";
+                case "z_sweep"
+                    mode = "Z Sweep Mode";
+                otherwise
+                    mode = "Unsupported Plan";
+            end
+        end
+
+        function textValue = planTypeText(~, plan)
+            switch string(plan.kind)
+                case "point"
+                    textValue = "Point";
+                case "path"
+                    textValue = "Path";
+                case "z_sweep"
+                    if plan.isMatrix
+                        textValue = "Z Sweep Matrix";
+                    else
+                        textValue = "Z Sweep";
+                    end
+                otherwise
+                    textValue = "Unsupported";
+            end
         end
 
         function validateTrajectoryForRun(obj, traj)

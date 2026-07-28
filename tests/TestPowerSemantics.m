@@ -56,20 +56,6 @@ classdef TestPowerSemantics < matlab.unittest.TestCase
             testCase.verifyEqual(string(trajectory.meta.powerSource), "fixed_override");
         end
 
-        function streamAcceptsAnyConstantPlanPower(testCase)
-            trajectory = lw_make_trajectory([0; 1], [0; 0], [0; 0], [6; 6], ...
-                "imported_points", "point+stream", struct('powerSource', "file"));
-
-            testCase.verifyEqual(trajectoryConstantPower(trajectory), 6);
-        end
-
-        function streamRejectsVariablePlanPower(testCase)
-            trajectory = lw_make_trajectory([0; 1], [0; 0], [0; 0], [6; 7], ...
-                "imported_points", "point+stream", struct('powerSource', "file"));
-
-            testCase.verifyError(@() trajectoryConstantPower(trajectory), 'lw:VariableStreamPower');
-        end
-
         function powerValidationRejectsOutOfRangeValues(testCase)
             testCase.verifyEqual(validatePowerPercent(0, 'Power'), 0);
             testCase.verifyEqual(validatePowerPercent(100, 'Power'), 100);

@@ -201,6 +201,7 @@ classdef StageLaserController < handle
             obj.Model.Ui.StartXField.Value = obj.Model.State.currentPosition.x;
             obj.Model.Ui.StartYField.Value = obj.Ports.stageYToDisplay(obj.Model.State.currentPosition.y);
             obj.Model.Ui.StartZField.Value = obj.Model.State.currentPosition.z;
+            obj.markPreparedPlanDirtyAfterPositionCopy();
             obj.Ports.logMessage('Current position copied into target and origin fields.');
         end
 
@@ -302,6 +303,7 @@ classdef StageLaserController < handle
             obj.Model.Ui.ZSweepYField.Value = obj.Ports.stageYToDisplay(obj.Model.State.currentPosition.y);
             obj.Model.Ui.ZSweepBackField.Value = obj.Model.State.currentPosition.z;
             obj.Model.Ui.ZSweepFrontField.Value = obj.Model.State.currentPosition.z;
+            obj.markPreparedPlanDirtyAfterPositionCopy();
             obj.Ports.logMessage(sprintf('Current position copied into Z Sweep: X %.3f, Y %.3f, Z %.3f mm.', ...
                 obj.Model.State.currentPosition.x, obj.Ports.stageYToDisplay(obj.Model.State.currentPosition.y), obj.Model.State.currentPosition.z));
         end
@@ -486,7 +488,7 @@ classdef StageLaserController < handle
             velocityFields = [ ...
                 obj.Model.Ui.ManualVelXField, obj.Model.Ui.ManualVelYField, obj.Model.Ui.ManualVelZField, ...
                 obj.Model.Ui.AbsoluteVelXField, obj.Model.Ui.AbsoluteVelYField, obj.Model.Ui.AbsoluteVelZField, ...
-                obj.Model.Ui.StreamSpeedField, obj.Model.Ui.ZSweepSpeedField, obj.Model.Ui.ZSweepReturnSpeedField];
+                obj.Model.Ui.ZSweepSpeedField, obj.Model.Ui.ZSweepReturnSpeedField];
             accelerationFields = [ ...
                 obj.Model.Ui.ManualAccXField, obj.Model.Ui.ManualAccYField, obj.Model.Ui.ManualAccZField, ...
                 obj.Model.Ui.AbsoluteAccXField, obj.Model.Ui.AbsoluteAccYField, obj.Model.Ui.AbsoluteAccZField];
@@ -505,6 +507,16 @@ classdef StageLaserController < handle
         function ensureCurrentPosition(obj)
             obj.Model.State.currentPosition = obj.Model.Services.stage.getPosition(obj.Model.State);
             obj.Model.LastPositionRefreshTic = obj.Model.Services.clock.tic();
+        end
+
+        function markPreparedPlanDirtyAfterPositionCopy(obj)
+            if isempty(obj.Model.PreparedPlan)
+                return;
+            end
+            obj.Model.TrajectoryInputsDirty = true;
+            obj.Model.RunCurrentText = ...
+                "Plan position inputs changed - prepare again";
+            obj.Ports.syncAll();
         end
 
         function setLaserState(obj, isOn)

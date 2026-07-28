@@ -18,12 +18,12 @@ not a runtime dependency.
 | Component | Owns | Must not own |
 | --- | --- | --- |
 | `AppController` | Composition, GUI builder binding, application-level logging, Mako/SLM shell lifecycle | Run algorithms or device protocol details |
-| `Model` | Existing `config`, unchanged `state` struct, UI handles, trajectory, progress text, run log | Hardware behavior |
+| `Model` | Existing `config`, unchanged `state` struct, UI handles, prepared-plan snapshot, trajectory, progress text, run log | Hardware behavior |
 | `StageLaserController` | Zaber, DAQ, manual motion, live position, laser output, manual exposure | Trajectory construction or imaging files |
 | `CarbideController` | Carbide connection, polling, presets, shutter/output state | Stage motion |
 | `FlirController` | FLIR connection, settings, live window, acquisition timer | 3D-stack workflow |
-| `TrajectoryController` | Source modes, import/generation, leveling, trajectory and Z Sweep previews | Hardware execution |
-| `RunController` | Preflight, Point/Stream/Path Plan/Z Sweep orchestration, pause/resume, ETA and recovery | Device protocol implementation |
+| `TrajectoryController` | Plan sources, import/generation, Z Sweep construction, leveling, frozen plan snapshots, and previews | Hardware execution |
+| `RunController` | Prepared-plan preflight and Point/Path/Z Sweep dispatch, pause/resume, ETA and recovery | Plan construction or device protocol implementation |
 | `ImagingController` | Single/batch imaging, auto exposure, metadata/output orchestration | FLIR live-window policy |
 | `UiPolicyController` | `Enable`/`Visible` policy, global status and synchronization order | Hardware writes |
 | `SafetyCoordinator` | The only STOP and window-close shutdown sequence | Feature workflow decisions |
@@ -47,13 +47,22 @@ not a runtime dependency.
 
 `trajectory.power` is the canonical execution-power snapshot for every loaded
 plan. Runtime controllers must not replace it from an unrelated UI field.
-Trajectory preview, preflight summaries, run logs, Point Mode, Stream Mode,
-and Path Plan Mode must all consume that same snapshot. `meta.powerSource` is
+Trajectory preview, preflight summaries, run logs, Point execution, and Path
+execution must all consume that same snapshot. `meta.powerSource` is
 descriptive (`plan` or `file`) and must never trigger a runtime override.
 
 Z Sweep has no loaded trajectory and therefore owns a separate Sweep Power
-parameter. Control-tab Manual Power and Exposure Power are manual-hardware
-settings only.
+parameter in its prepared-plan snapshot. Control-tab Manual Power and Exposure
+Power are manual-hardware settings only.
+
+## Prepared-plan ownership
+
+`Model.PreparedPlan` is the execution boundary between Plan and Run. Plan
+preparation freezes one `kind` (`point`, `path`, or `z_sweep`) plus all
+kind-specific inputs. The Run tab derives its display and dispatcher from that
+kind; it must not expose a second mode selector or reread Plan parameter fields
+at Start. Any subsequent Plan edit sets `TrajectoryInputsDirty` and prevents
+execution until a new snapshot is prepared.
 
 ## Writing-plan ownership
 
@@ -65,18 +74,17 @@ only inside the legacy CSV import adapter and must not enter runtime state.
 
 ## Point timing ownership
 
-Writing-plan `dwell_s` and `pause_s` values are the canonical Point Mode timing
+Writing-plan `dwell_s` and `pause_s` values are the canonical Point timing
 snapshot. Preflight resolves them into `trajectory.dwellSeconds` and
 `trajectory.preWritePauseSeconds`; execution, summaries, and run-log snapshots
-consume those same vectors. Run-tab Default Dwell and Default Settle are
-fallbacks only for trajectories without writing-plan timing.
+consume those same vectors. Plan-tab Default Dwell and Default Settle are
+frozen fallbacks only for trajectories without writing-plan timing.
 
-Positive point dwell and Stream Mode gate durations must be representable by
-the configured Zaber digital-output scheduler. Point and manual exposures use
-the device's scheduled active-to-inactive action; MATLAB waits only to
-coordinate UI, STOP, and the next operation. Logical active/inactive requests
-are mapped to electrical ON/OFF through the explicitly configured trigger
-polarity.
+Positive point dwell durations must be representable by the configured Zaber
+digital-output scheduler. Point and manual exposures use the device's
+scheduled active-to-inactive action; MATLAB waits only to coordinate UI, STOP,
+and the next operation. Logical active/inactive requests are mapped to
+electrical ON/OFF through the explicitly configured trigger polarity.
 
 ## Safety sequence
 
@@ -103,7 +111,7 @@ Before committing a behavior-preserving change:
 2. Run `run_refactor_checks()` from this directory.
 3. For lifecycle or GUI work, also run with `IncludeStress=true` and
    `IncludeScreenshots=true`.
-4. Verify the GUI still has 527 objects and the locked signature remains
-   `d3e089b229289266edaadd6820f3094987982a03be3f877cdbb74daa53f0aa37`.
+4. Verify the GUI object count and normalized signature match
+   `tests/TestLaserWritingAppBaseline.m`.
 5. Keep behavior fixes separate from refactor-only commits.
 6. Run the supervised hardware checklist before promoting this entry point.

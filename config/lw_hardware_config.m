@@ -17,8 +17,6 @@ config.stage.pulseTriggerActiveHigh = true;
 % Zaber ASCII scheduled digital outputs use 0.1 ms units (firmware 7.37+).
 config.stage.digitalOutputScheduleMinUs = 100;
 config.stage.digitalOutputScheduleResolutionUs = 100;
-config.stage.ttlGateWidthUs = 100;
-config.stage.maxPulseTriggerRateHz = 1e3;
 
 config.daq = struct();
 config.daq.vendor = "ni";
@@ -54,7 +52,7 @@ config.execution = struct();
 config.execution.pointPause = 0.1;
 % Fallback dwell for plans without per-row dwell_s; UI displays microseconds.
 config.execution.pointExposureTime = 100e-6;
-config.execution.streamTargetSpeed = 1.0;
+config.execution.defaultZSweepSpeed = 1.0;
 config.execution.zSweepRecoveryAttempts = 3;
 
 config.logging = struct();

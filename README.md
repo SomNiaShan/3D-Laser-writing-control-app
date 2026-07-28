@@ -43,10 +43,23 @@ Run lifecycle stress and the locked screenshot comparison with:
 report = run_refactor_checks(IncludeStress=true, IncludeScreenshots=true);
 ```
 
-The locked GUI contract is 528 objects with normalized signature SHA-256
-`5c4dad2270f7111926928bbc2836e50f1d95449cb55f5e954a745f840b02f717`.
+The locked GUI contract is 514 objects. Its normalized signature is recorded
+in `tests/TestLaserWritingAppBaseline.m`.
 Mako device-discovery availability is normalized because it is runtime
 hardware state rather than a static GUI property.
+
+## Plan-driven execution
+
+The Plan tab is the only place that chooses and prepares work. Imported,
+generated, and writing-plan files become a frozen Point or Path plan based on
+their contents. Z Sweep is a Plan source with its single-sweep, matrix, and
+block parameters beside the shared preview.
+
+The Run tab has no mode selector and does not rebuild work from live parameter
+fields. It reports the prepared plan type and readiness, performs preflight,
+then dispatches Point, Path, or Z Sweep execution from the frozen plan
+snapshot. Editing a Plan input marks that snapshot stale and disables Start
+until the plan is prepared again.
 
 ## Execution power semantics
 
@@ -54,10 +67,9 @@ Loaded plans carry their final execution power in `trajectory.power`; preview,
 preflight, logging, and execution all use that same snapshot. Frame and Mark
 Text power is set on the Plan tab. Imported points and writing plans use their
 file power by default. When `Use Fixed Power (%)` is selected before import,
-every imported operation instead uses the adjacent fixed power value.
-Stream Mode accepts only plans whose stored power is constant. Sweep Power is
-separate and is used only by Z Sweep Mode. Manual power fields on the Control
-tab never modify a loaded plan.
+every imported operation instead uses the adjacent fixed power value. Sweep
+Power is separate and is frozen into a Z Sweep plan. Manual power fields on
+the Control tab never modify a prepared plan.
 
 Writing-plan v2 files use `operation=point|path`. Path files contain explicit
 laser-on and laser-off segments grouped by `group_id`. Generation, placement,
@@ -73,20 +85,16 @@ at the import boundary, where they are converted immediately to the v2 model.
 Point Mode is a timed-dwell workflow, not a single-pulse workflow. For an
 imported writing plan, each `operation=point` row's `dwell_s` and `pause_s` values
 are canonical: the stage moves to the point, waits for `pause_s`, and then
-uses a Zaber firmware-scheduled digital-output gate for `dwell_s`. Run-tab
-Default Dwell and Default Settle values are used only by trajectories that do
-not contain per-row writing-plan timing.
+uses a Zaber firmware-scheduled digital-output gate for `dwell_s`. Plan-tab
+Default Dwell and Default Settle values are frozen into Point plans only when
+their source does not contain per-row writing-plan timing.
 
 The configured X-LDA digital output supports scheduled durations from 100 us
-in 100 us increments. Positive dwell or Stream Mode gate values below 100 us,
-or values that are not a multiple of 100 us, are rejected instead of rounded.
+in 100 us increments. Positive dwell values below 100 us, or values that are
+not a multiple of 100 us, are rejected instead of rounded.
 A zero point dwell is retained as an explicit no-exposure point. The trigger
 polarity is safety-critical and is set explicitly by
 `config.stage.pulseTriggerActiveHigh`.
-
-Stream Mode likewise produces a timed level gate at each trajectory point.
-It does not claim or guarantee one optical pulse per gate; optical pulse count
-depends on the CARBIDE repetition rate and the unsynchronized gate phase.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) before changing controller ownership.
 Physical-device validation remains a supervised lab step documented in

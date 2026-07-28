@@ -8,6 +8,7 @@ classdef Model < handle
         Ui
         Figure = []
         Trajectory = []
+        PreparedPlan = []
         TrajectoryInputsDirty = false
         RunProgressText = "0 / 0"
         RunCurrentText = "Idle"

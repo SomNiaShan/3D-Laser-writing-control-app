@@ -39,8 +39,6 @@ before enabling any output.
   measured gate widths, start, pause before exposure, resume, STOP during a
   long dwell, zero-dwell behavior, normal finish, and error recovery. Confirm
   sub-100-us and non-100-us-multiple dwell values are rejected at preflight.
-- Stream Mode: start, STOP, normal finish, trigger-rate validation, and error
-  recovery.
 - Path Plan Mode: preflight, settling at each group start, explicit
   laser-on/off segment execution, pause/resume by group, STOP, and output
   comparison.

@@ -84,7 +84,7 @@ classdef TestWritingPlanV2 < matlab.unittest.TestCase
             testCase.verifyEqual( ...
                 trajectory.writingPlan.operation, ["point"; "point"]);
             testCase.verifyEqual(trajectory.writingPlan.dwell, [0.1; 0.2]);
-            testCase.verifyEqual(trajectory.modeSupport, "point+stream");
+            testCase.verifyEqual(trajectory.modeSupport, "point");
         end
     end
 end
