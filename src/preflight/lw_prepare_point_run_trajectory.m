@@ -7,7 +7,7 @@ if isempty(trajectory) || ~isstruct(trajectory) || ~isfield(trajectory, 'x') || 
     error('No point trajectory is loaded.');
 end
 
-if isfield(trajectory, 'cutPlan') && istable(trajectory.cutPlan)
+if isfield(trajectory, 'writingPlan') && istable(trajectory.writingPlan)
     [trajectory, dwellSeconds, settleSeconds] = localFromWritingPlan(trajectory);
     timingSource = "writing_plan";
 elseif isfield(trajectory, 'dwellSeconds') && ...
@@ -59,24 +59,24 @@ timing = struct( ...
 end
 
 function [trajectory, dwellSeconds, settleSeconds] = localFromWritingPlan(trajectory)
-plan = trajectory.cutPlan;
+plan = trajectory.writingPlan;
 if isempty(plan) || height(plan) == 0
     error('Point Mode requires at least one writing-plan row.');
 end
 
-requiredNames = {'mode', 'x', 'y', 'z', 'power', 'dwell', 'pauseSeconds'};
+requiredNames = {'operation', 'x', 'y', 'z', 'power', 'dwell', 'pauseSeconds'};
 missingNames = setdiff(requiredNames, plan.Properties.VariableNames, 'stable');
 if ~isempty(missingNames)
     error('Writing plan is missing internal Point Mode columns: %s.', ...
         strjoin(missingNames, ', '));
 end
 
-modeValues = string(plan.mode);
-badModeIndex = find(modeValues ~= "point", 1, 'first');
+operationValues = string(plan.operation);
+badModeIndex = find(operationValues ~= "point", 1, 'first');
 if ~isempty(badModeIndex)
     error('lw:PointModeMixedPlan', ...
-        ['Point Mode requires every writing-plan row to use mode=point; ', ...
-        'row %d uses mode=%s.'], badModeIndex, char(modeValues(badModeIndex)));
+        ['Point Mode requires every writing-plan row to use operation=point; ', ...
+        'row %d uses operation=%s.'], badModeIndex, char(operationValues(badModeIndex)));
 end
 
 trajectory.x = double(plan.x(:));

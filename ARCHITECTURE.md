@@ -23,7 +23,7 @@ not a runtime dependency.
 | `CarbideController` | Carbide connection, polling, presets, shutter/output state | Stage motion |
 | `FlirController` | FLIR connection, settings, live window, acquisition timer | 3D-stack workflow |
 | `TrajectoryController` | Source modes, import/generation, leveling, trajectory and Z Sweep previews | Hardware execution |
-| `RunController` | Preflight, Point/Stream/Cut Plan/Z Sweep orchestration, pause/resume, ETA and recovery | Device protocol implementation |
+| `RunController` | Preflight, Point/Stream/Path Plan/Z Sweep orchestration, pause/resume, ETA and recovery | Device protocol implementation |
 | `ImagingController` | Single/batch imaging, auto exposure, metadata/output orchestration | FLIR live-window policy |
 | `UiPolicyController` | `Enable`/`Visible` policy, global status and synchronization order | Hardware writes |
 | `SafetyCoordinator` | The only STOP and window-close shutdown sequence | Feature workflow decisions |
@@ -48,12 +48,20 @@ not a runtime dependency.
 `trajectory.power` is the canonical execution-power snapshot for every loaded
 plan. Runtime controllers must not replace it from an unrelated UI field.
 Trajectory preview, preflight summaries, run logs, Point Mode, Stream Mode,
-and Cut Plan Mode must all consume that same snapshot. `meta.powerSource` is
+and Path Plan Mode must all consume that same snapshot. `meta.powerSource` is
 descriptive (`plan` or `file`) and must never trigger a runtime override.
 
 Z Sweep has no loaded trajectory and therefore owns a separate Sweep Power
 parameter. Control-tab Manual Power and Exposure Power are manual-hardware
 settings only.
+
+## Writing-plan ownership
+
+`trajectory.writingPlan` is the only internal writing-plan representation. Its
+point/path operations and explicit path-segment laser states remain intact
+through transforms, preview, preflight, execution, recovery, and run-log
+snapshots. Historical `mode=scan|cut` columns and lead/exit columns are legal
+only inside the legacy CSV import adapter and must not enter runtime state.
 
 ## Point timing ownership
 

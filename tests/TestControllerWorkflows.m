@@ -52,8 +52,32 @@ classdef TestControllerWorkflows < matlab.unittest.TestCase
             framePlan = controller.Trajectory.buildTrajectoryFromUi();
             testCase.verifyEqual(numel(framePlan.x), 36);
             testCase.verifyTrue(all(framePlan.power == model.Ui.PlanPowerField.Value));
+            testCase.verifyTrue(isfield(model.Ui, 'UseFixedPowerCheckBox'));
             testCase.verifyFalse(isfield(model.Ui, 'UseImportedPowerCheckBox'));
             testCase.verifyFalse(isfield(model.Ui, 'StreamFixedPowerField'));
+
+            folder = tempname;
+            mkdir(folder);
+            folderCleanup = onCleanup(@() rmdir(folder, 's'));
+            pointsPath = fullfile(folder, 'points.csv');
+            writematrix([0, 0, 0, 4; 1, 2, 3, 9], pointsPath);
+            model.Ui.ImportedPointsRadio.Value = true;
+            controller.Trajectory.onSourceModeChanged([], []);
+            model.Ui.InputFileField.Value = pointsPath;
+            model.Ui.UseFixedPowerCheckBox.Value = false;
+            controller.UiPolicy.syncAll();
+            testCase.verifyEqual(string(model.Ui.PlanPowerField.Enable), "off");
+            controller.Trajectory.importTrajectoryImpl();
+            testCase.verifyEqual(model.Trajectory.power, [4; 9]);
+
+            model.Ui.UseFixedPowerCheckBox.Value = true;
+            controller.Trajectory.onFixedPowerOverrideChanged([], []);
+            testCase.verifyTrue(model.TrajectoryInputsDirty);
+            testCase.verifyEqual(string(model.Ui.PlanPowerField.Enable), "on");
+            model.Ui.PlanPowerField.Value = 13;
+            controller.Trajectory.importTrajectoryImpl();
+            testCase.verifyEqual(model.Trajectory.power, [13; 13]);
+            clear folderCleanup;
 
             center = model.Config.motion.centerPosition;
             model.Ui.ZSweepModeRadio.Value = true;

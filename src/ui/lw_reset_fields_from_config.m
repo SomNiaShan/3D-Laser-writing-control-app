@@ -35,6 +35,7 @@ ui.ColumnXField.Value = '';
 ui.ColumnYField.Value = '';
 ui.ColumnZField.Value = '';
 ui.ColumnPField.Value = '';
+ui.UseFixedPowerCheckBox.Value = false;
 ui.PlanPowerField.Value = 10;
 ui.StartXField.Value = 0;
 ui.StartYField.Value = 0;

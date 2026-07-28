@@ -21,22 +21,23 @@ classdef TrajectoryController < handle
 
         function initializeSourceModeMemory(obj)
             obj.Model.SourceModeMemory = struct( ...
-                'importedPoints', obj.sourceModeFields('', '', '', '', '', 10), ...
-                'markText', obj.sourceModeFields('', 'TEXT', '0.01', '', '', 10), ...
-                'frame', obj.sourceModeFields('Outer ring of an MxN point grid', '10', '10', '0.01', '0.01', 10), ...
-                'gcode', obj.sourceModeFields('', '', '', '', '', 10));
+                'importedPoints', obj.sourceModeFields('', '', '', '', '', 10, false), ...
+                'markText', obj.sourceModeFields('', 'TEXT', '0.01', '', '', 10, false), ...
+                'frame', obj.sourceModeFields('Outer ring of an MxN point grid', '10', '10', '0.01', '0.01', 10, false), ...
+                'gcode', obj.sourceModeFields('', '', '', '', '', 10, false));
             obj.Model.CurrentSourceMode = obj.selectedSourceMode();
             obj.restoreSourceModeFields(obj.Model.CurrentSourceMode);
         end
 
-        function values = sourceModeFields(~, inputFile, columnX, columnY, columnZ, columnP, planPower)
+        function values = sourceModeFields(~, inputFile, columnX, columnY, columnZ, columnP, planPower, useFixedPower)
             values = struct( ...
                 'inputFile', string(inputFile), ...
                 'columnX', string(columnX), ...
                 'columnY', string(columnY), ...
                 'columnZ', string(columnZ), ...
                 'columnP', string(columnP), ...
-                'planPower', double(planPower));
+                'planPower', double(planPower), ...
+                'useFixedPower', logical(useFixedPower));
         end
 
         function saveSourceModeFields(obj, mode)
@@ -46,7 +47,8 @@ classdef TrajectoryController < handle
                 obj.Model.Ui.ColumnYField.Value, ...
                 obj.Model.Ui.ColumnZField.Value, ...
                 obj.Model.Ui.ColumnPField.Value, ...
-                obj.Model.Ui.PlanPowerField.Value);
+                obj.Model.Ui.PlanPowerField.Value, ...
+                obj.Model.Ui.UseFixedPowerCheckBox.Value);
         end
 
         function restoreSourceModeFields(obj, mode)
@@ -57,6 +59,7 @@ classdef TrajectoryController < handle
             obj.Model.Ui.ColumnZField.Value = values.columnZ;
             obj.Model.Ui.ColumnPField.Value = values.columnP;
             obj.Model.Ui.PlanPowerField.Value = values.planPower;
+            obj.Model.Ui.UseFixedPowerCheckBox.Value = values.useFixedPower;
         end
 
         function key = sourceModeStorageKey(~, mode)
@@ -110,6 +113,16 @@ classdef TrajectoryController < handle
             obj.Ports.syncAll();
         end
 
+        function onFixedPowerOverrideChanged(obj, ~, ~)
+            if ~isempty(obj.Model.Trajectory) && obj.currentSourceMatchesLoadedTrajectory()
+                obj.Model.TrajectoryInputsDirty = true;
+                obj.Model.RunCurrentText = "Fixed-power setting changed - re-import";
+                obj.Ports.logMessage( ...
+                    'Fixed-power override changed; re-import the plan before running.');
+            end
+            obj.Ports.syncAll();
+        end
+
         function onZSweepPreviewChanged(obj, ~, ~)
             obj.Ports.syncAll();
         end
@@ -141,7 +154,10 @@ classdef TrajectoryController < handle
                         error('Please select an input file first.');
                     end
 
-                    out = lw_import_points_table(filename, obj.Model.Ui.PlanPowerField.Value);
+                    out = lw_import_points_table( ...
+                        filename, ...
+                        obj.Model.Ui.UseFixedPowerCheckBox.Value, ...
+                        obj.Model.Ui.PlanPowerField.Value);
 
                 case "Mark Text"
                     markText = string(obj.Model.Ui.ColumnXField.Value);
@@ -174,15 +190,16 @@ classdef TrajectoryController < handle
 
         function out = trajectoryDisplayYToStage(obj, out)
             out.y = obj.Ports.displayYToStage(out.y);
-            if ~isfield(out, 'cutPlan') || ~istable(out.cutPlan)
+            if ~isfield(out, 'writingPlan') || ~istable(out.writingPlan)
                 return;
             end
 
-            yFields = {'y', 'y2', 'leadY', 'exitY'};
+            yFields = {'y', 'y2'};
             for i = 1:numel(yFields)
                 fieldName = yFields{i};
-                if ismember(fieldName, out.cutPlan.Properties.VariableNames)
-                    out.cutPlan.(fieldName) = obj.Ports.displayYToStage(out.cutPlan.(fieldName));
+                if ismember(fieldName, out.writingPlan.Properties.VariableNames)
+                    out.writingPlan.(fieldName) = ...
+                        obj.Ports.displayYToStage(out.writingPlan.(fieldName));
                 end
             end
         end
@@ -274,13 +291,17 @@ classdef TrajectoryController < handle
                     setVisibility(obj.Model.Ui.BrowseInputFileButton, true);
                     setVisibility([obj.Model.Ui.ColumnXLabel, obj.Model.Ui.ColumnXField, obj.Model.Ui.ColumnYLabel, obj.Model.Ui.ColumnYField, ...
                         obj.Model.Ui.ColumnZLabel, obj.Model.Ui.ColumnZField, obj.Model.Ui.ColumnPLabel, obj.Model.Ui.ColumnPField, ...
-                        obj.Model.Ui.PlanPowerLabel, obj.Model.Ui.PlanPowerField], false);
-                    obj.Model.Ui.PlanPowerLabel.Text = 'XYZ-only Power (%)';
-                    obj.Model.Ui.PlanPowerField.Tooltip = 'Used only for XYZ files that do not contain a fourth power column';
-                    setVisibility([obj.Model.Ui.PlanPowerLabel, obj.Model.Ui.PlanPowerField], true);
+                        obj.Model.Ui.PlanPowerLabel, obj.Model.Ui.UseFixedPowerCheckBox, obj.Model.Ui.PlanPowerField], false);
+                    obj.Model.Ui.UseFixedPowerCheckBox.Text = 'Use Fixed Power (%)';
+                    obj.Model.Ui.UseFixedPowerCheckBox.Tooltip = ...
+                        'Ignore every file power value and use the fixed power for all imported operations';
+                    obj.Model.Ui.PlanPowerField.Tooltip = ...
+                        'Fixed execution power used for every imported operation when enabled';
+                    setVisibility([obj.Model.Ui.UseFixedPowerCheckBox, obj.Model.Ui.PlanPowerField], true);
                     obj.Model.Ui.SourceGrid.RowHeight = {90, 'fit', 'fit', 0, 0, 0, 0, 'fit', 'fit'};
                     obj.Model.Ui.ImportGenerateButton.Text = 'Import Plan';
-                    obj.Model.Ui.TransformHintLabel.Text = 'XYZP and writing plans use file power; XYZ-only files use the fixed power above.';
+                    obj.Model.Ui.TransformHintLabel.Text = ...
+                        'Use Fixed Power overrides every imported power value; otherwise the file power is used.';
 
                 case "Mark Text"
                     obj.Model.Ui.InputFileLabel.Text = 'Notes';
@@ -291,6 +312,7 @@ classdef TrajectoryController < handle
                     obj.Model.Ui.ColumnYLabel.Text = 'Pitch (mm)';
                     setVisibility([obj.Model.Ui.ColumnXLabel, obj.Model.Ui.ColumnXField, obj.Model.Ui.ColumnYLabel, obj.Model.Ui.ColumnYField], true);
                     setVisibility([obj.Model.Ui.ColumnZLabel, obj.Model.Ui.ColumnZField, obj.Model.Ui.ColumnPLabel, obj.Model.Ui.ColumnPField], false);
+                    setVisibility(obj.Model.Ui.UseFixedPowerCheckBox, false);
                     obj.Model.Ui.PlanPowerLabel.Text = 'Power (%)';
                     obj.Model.Ui.PlanPowerField.Tooltip = 'Execution power stored in the generated Mark Text plan';
                     setVisibility([obj.Model.Ui.PlanPowerLabel, obj.Model.Ui.PlanPowerField], true);
@@ -309,6 +331,7 @@ classdef TrajectoryController < handle
                     obj.Model.Ui.ColumnPLabel.Text = 'Pitch Y (mm)';
                     setVisibility([obj.Model.Ui.ColumnXLabel, obj.Model.Ui.ColumnXField, obj.Model.Ui.ColumnYLabel, obj.Model.Ui.ColumnYField, ...
                         obj.Model.Ui.ColumnZLabel, obj.Model.Ui.ColumnZField, obj.Model.Ui.ColumnPLabel, obj.Model.Ui.ColumnPField], true);
+                    setVisibility(obj.Model.Ui.UseFixedPowerCheckBox, false);
                     obj.Model.Ui.PlanPowerLabel.Text = 'Power (%)';
                     obj.Model.Ui.PlanPowerField.Tooltip = 'Execution power stored in the generated Frame plan';
                     setVisibility([obj.Model.Ui.PlanPowerLabel, obj.Model.Ui.PlanPowerField], true);
@@ -324,7 +347,7 @@ classdef TrajectoryController < handle
                     obj.Model.Ui.ImportGenerateButton.Text = 'Parse G-code';
                     setVisibility([obj.Model.Ui.ColumnXLabel, obj.Model.Ui.ColumnXField, obj.Model.Ui.ColumnYLabel, obj.Model.Ui.ColumnYField, ...
                         obj.Model.Ui.ColumnZLabel, obj.Model.Ui.ColumnZField, obj.Model.Ui.ColumnPLabel, obj.Model.Ui.ColumnPField, ...
-                        obj.Model.Ui.PlanPowerLabel, obj.Model.Ui.PlanPowerField], false);
+                        obj.Model.Ui.PlanPowerLabel, obj.Model.Ui.UseFixedPowerCheckBox, obj.Model.Ui.PlanPowerField], false);
                     obj.Model.Ui.SourceGrid.RowHeight = {90, 'fit', 'fit', 0, 0, 0, 0, 0, 'fit'};
                     obj.Model.Ui.TransformHintLabel.Text = 'G-code is the next milestone.';
             end
@@ -364,10 +387,10 @@ classdef TrajectoryController < handle
         end
 
         function syncLoadedTrajectoryPreviewContents(obj)
-            if ~isempty(obj.Model.Trajectory) && obj.isCutPlanTrajectory(obj.Model.Trajectory)
-                obj.syncCutPlanPreviewContents();
+            if ~isempty(obj.Model.Trajectory) && obj.isPathPlanTrajectory(obj.Model.Trajectory)
+                obj.syncPathPlanPreviewContents();
                 obj.appendDirtyPlanWarning();
-                title(obj.Model.Ui.TrajectoryAxes, 'Cut Plan Preview');
+                title(obj.Model.Ui.TrajectoryAxes, 'Path Plan Preview');
                 return;
             end
 
@@ -421,37 +444,40 @@ classdef TrajectoryController < handle
             title(obj.Model.Ui.TrajectoryAxes, 'XYZ Preview');
         end
 
-        function tf = isCutPlanTrajectory(~, traj)
-            tf = isfield(traj, 'cutPlan') && istable(traj.cutPlan) && ...
-                any(string(traj.cutPlan.mode) == "cut");
+        function tf = isPathPlanTrajectory(~, traj)
+            tf = isfield(traj, 'writingPlan') && istable(traj.writingPlan) && ...
+                any(string(traj.writingPlan.operation) == "path");
         end
 
-        function syncCutPlanPreviewContents(obj)
-            cutRows = obj.Model.Trajectory.cutPlan(string(obj.Model.Trajectory.cutPlan.mode) == "cut", :);
-            cutGroups = lw_cut_plan_groups(cutRows);
-            xValues = [cutRows.leadX; cutRows.x; cutRows.x2; cutRows.exitX];
-            yValues = obj.Ports.stageYToDisplay([cutRows.leadY; cutRows.y; cutRows.y2; cutRows.exitY]);
-            zValues = [cutRows.leadZ; cutRows.z; cutRows.z2; cutRows.exitZ];
+        function syncPathPlanPreviewContents(obj)
+            pathRows = obj.Model.Trajectory.writingPlan( ...
+                string(obj.Model.Trajectory.writingPlan.operation) == "path", :);
+            pathGroups = lw_path_plan_groups(pathRows);
+            xValues = [pathRows.x; pathRows.x2];
+            yValues = obj.Ports.stageYToDisplay([pathRows.y; pathRows.y2]);
+            zValues = [pathRows.z; pathRows.z2];
             obj.Model.PreviewBounds = struct('x', xValues, 'y', yValues, 'z', zValues);
 
-            cutCount = height(cutRows);
-            groupCount = numel(cutGroups);
-            [previewRows, isSampled] = lw_cut_plan_preview_rows(cutRows, obj.Model.PreviewMaxPoints);
+            segmentCount = height(pathRows);
+            groupCount = numel(pathGroups);
+            [previewRows, isSampled] = lw_path_plan_preview_rows( ...
+                pathRows, obj.Model.PreviewMaxPoints);
 
-            lw_draw_cut_plan_preview_lines(obj.Model.Ui.TrajectoryAxes, previewRows, obj.Ports.stageYToDisplay);
+            lw_draw_path_plan_preview_lines( ...
+                obj.Model.Ui.TrajectoryAxes, previewRows, obj.Ports.stageYToDisplay);
             obj.Model.Ui.PreviewScatter = scatter3(obj.Model.Ui.TrajectoryAxes, previewRows.x, obj.Ports.stageYToDisplay(previewRows.y), ...
                 previewRows.z, 22, previewRows.power, 'filled');
             obj.setColorDataTipLabel(obj.Model.Ui.PreviewScatter, 'Power (%)');
 
-            powerValues = cutRows.power;
+            powerValues = pathRows.power;
             if isSampled
                 obj.Model.Ui.PreviewNoteLabel.Text = sprintf( ...
-                    'Cut plan loaded: %d cuts / %d groups (sampled preview: %d cuts) | Execution Power %.2f to %.2f %%', ...
-                    cutCount, groupCount, height(previewRows), min(powerValues), max(powerValues));
+                    'Path plan loaded: %d segments / %d groups (sampled preview: %d segments) | Execution Power %.2f to %.2f %%', ...
+                    segmentCount, groupCount, height(previewRows), min(powerValues), max(powerValues));
             else
                 obj.Model.Ui.PreviewNoteLabel.Text = sprintf( ...
-                    'Cut plan loaded: %d cuts / %d groups | Execution Power %.2f to %.2f %%', ...
-                    cutCount, groupCount, min(powerValues), max(powerValues));
+                    'Path plan loaded: %d segments / %d groups | Execution Power %.2f to %.2f %%', ...
+                    segmentCount, groupCount, min(powerValues), max(powerValues));
             end
             obj.Model.Ui.PreviewColorbar = colorbar(obj.Model.Ui.TrajectoryAxes);
             obj.Model.Ui.PreviewColorbar.Label.String = 'Power (%)';

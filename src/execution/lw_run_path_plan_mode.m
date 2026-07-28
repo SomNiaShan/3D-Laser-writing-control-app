@@ -1,5 +1,5 @@
-function [state, result] = lw_run_cut_plan_mode(state, config, trajectory, options)
-%LW_RUN_CUT_PLAN_MODE Execute cut rows with laser-off lead-in/out stream moves.
+function [state, result] = lw_run_path_plan_mode(state, config, trajectory, options)
+%LW_RUN_PATH_PLAN_MODE Execute canonical path groups with explicit laser state.
 
 if nargin < 4 || isempty(options)
     options = struct();
@@ -24,106 +24,97 @@ end
 if ~isfield(options, 'laserStateFcn')
     options.laserStateFcn = [];
 end
-if ~isfield(options, 'startCutIndex') || isempty(options.startCutIndex)
-    options.startCutIndex = 1;
+if ~isfield(options, 'startPathGroupIndex') || isempty(options.startPathGroupIndex)
+    options.startPathGroupIndex = 1;
 end
 
-if ~isfield(trajectory, 'cutPlan') || ~istable(trajectory.cutPlan)
-    error('Cut Plan Mode requires a loaded writing plan with cut rows.');
+if ~isfield(trajectory, 'writingPlan') || ~istable(trajectory.writingPlan)
+    error('Path Plan Mode requires a loaded canonical writing plan.');
 end
 
-cutPlan = trajectory.cutPlan(string(trajectory.cutPlan.mode) == "cut", :);
-cutCount = height(cutPlan);
-if cutCount == 0
-    error('Cut Plan Mode requires at least one cut row.');
-end
-
-cutGroups = lw_validate_cut_plan_rows_for_run(cutPlan);
-groupCount = numel(cutGroups);
-startCutIndex = max(1, min(round(double(options.startCutIndex)), groupCount + 1));
-result = localRunResult("finished", groupCount + 1, ...
-    localRowTarget(cutGroups(end).rows(end, :), "exit"), groupCount);
+pathGroups = lw_validate_path_plan_for_run(trajectory.writingPlan);
+groupCount = numel(pathGroups);
+startPathGroupIndex = max(1, min( ...
+    round(double(options.startPathGroupIndex)), groupCount + 1));
+finalTarget = localRowTarget(pathGroups(end).rows(end, :), "end");
+result = localRunResult("finished", groupCount + 1, finalTarget, groupCount);
 laserOutputIsActive = [];
 
-if startCutIndex > groupCount
+if startPathGroupIndex > groupCount
     return;
 end
 
 try
     localSafeOutputsOff(true);
-
-    for cutIndex = startCutIndex:groupCount
+    for groupIndex = startPathGroupIndex:groupCount
         if options.shouldStopFcn()
-            result = localRunResult("stopped", cutIndex, localCurrentPositionTarget(state), cutIndex - 1);
+            result = localRunResult( ...
+                "stopped", groupIndex, localCurrentPositionTarget(state), groupIndex - 1);
             return;
         end
 
-        groupRows = cutGroups(cutIndex).rows;
-        leadTarget = localRowTarget(groupRows(1, :), "lead");
-        startTarget = localRowTarget(groupRows(1, :), "start");
-        exitTarget = localRowTarget(groupRows(end, :), "exit");
-
-        localUpdateProgress(cutIndex, leadTarget, "Moving");
+        rows = pathGroups(groupIndex).rows;
+        startTarget = localRowTarget(rows(1, :), "start");
+        endTarget = localRowTarget(rows(end, :), "end");
+        localUpdateProgress(groupIndex, startTarget, "Moving");
         moveOptions = struct( ...
             'shouldStopFcn', options.shouldStopFcn, ...
             'yieldFcn', options.yieldFcn, ...
             'pollIntervalSeconds', 0.02);
-        [state, wasStopped] = lw_move_absolute(state, leadTarget, options.motion, moveOptions);
+        [state, wasStopped] = lw_move_absolute( ...
+            state, startTarget, options.motion, moveOptions);
         localSafeOutputsOff();
         if wasStopped || options.shouldStopFcn()
-            result = localRunResult("stopped", cutIndex, localCurrentPositionTarget(state), cutIndex - 1);
+            result = localRunResult( ...
+                "stopped", groupIndex, localCurrentPositionTarget(state), groupIndex - 1);
             return;
         end
         if options.pauseRequestedFcn()
-            result = localRunResult("paused", cutIndex, leadTarget, cutIndex - 1);
+            result = localRunResult("paused", groupIndex, startTarget, groupIndex - 1);
             return;
         end
 
-        if groupRows.pauseSeconds(1) > 0
-            localUpdateProgress(cutIndex, leadTarget, "Settling");
-            [wasStopped, wasPaused] = localPauseWithCallbacks(groupRows.pauseSeconds(1));
+        if rows.pauseSeconds(1) > 0
+            localUpdateProgress(groupIndex, startTarget, "Settling");
+            [wasStopped, wasPaused] = localPauseWithCallbacks(rows.pauseSeconds(1));
             if wasStopped
-                result = localRunResult("stopped", cutIndex, leadTarget, cutIndex - 1);
+                result = localRunResult("stopped", groupIndex, startTarget, groupIndex - 1);
                 return;
             end
             if wasPaused
-                result = localRunResult("paused", cutIndex, leadTarget, cutIndex - 1);
+                result = localRunResult("paused", groupIndex, startTarget, groupIndex - 1);
                 return;
             end
         end
 
-        lw_set_laser_power(state, groupRows.power(1));
-        wasStopped = localRunCutStream(groupRows, leadTarget, startTarget, exitTarget);
+        lw_set_laser_power(state, rows.power(1));
+        wasStopped = localRunPathStream(rows, endTarget);
         localSafeOutputsOff(true);
-
         if wasStopped || options.shouldStopFcn()
-            result = localRunResult("stopped", cutIndex, localCurrentPositionTarget(state), cutIndex - 1);
+            result = localRunResult( ...
+                "stopped", groupIndex, localCurrentPositionTarget(state), groupIndex - 1);
             return;
         end
 
-        state.currentPosition = exitTarget;
-        localUpdateProgress(cutIndex, exitTarget, "Cut");
-
-        if cutIndex < groupCount && options.pauseRequestedFcn()
-            result = localRunResult("paused", cutIndex + 1, exitTarget, cutIndex);
+        state.currentPosition = endTarget;
+        localUpdateProgress(groupIndex, endTarget, "Path");
+        if groupIndex < groupCount && options.pauseRequestedFcn()
+            result = localRunResult("paused", groupIndex + 1, endTarget, groupIndex);
             return;
         end
-
     end
-
     localSafeOutputsOff(true);
 catch ME
     localSafeOutputsOff(true);
     rethrow(ME);
 end
 
-    function wasStopped = localRunCutStream(groupRows, leadTarget, startTarget, exitTarget)
+    function wasStopped = localRunPathStream(rows, endTarget)
         wasStopped = false;
         streams = struct();
         buffers = struct();
         triggerAxisName = localPulseTriggerAxisName(config);
         triggerChannel = localPulseTriggerChannel(config);
-
         try
             axisNames = {'x', 'y', 'z'};
             for axisIndex = 1:numel(axisNames)
@@ -136,16 +127,23 @@ end
                 streams.(axisName).setupStore(buffers.(axisName), 1);
             end
 
-            localAppendSegment(streams, leadTarget, startTarget, groupRows.leadSpeed(1));
-            localAppendTriggerState(streams.(triggerAxisName), triggerChannel, true, config);
-            for iSegment = 1:height(groupRows)
-                segmentStart = localRowTarget(groupRows(iSegment, :), "start");
-                segmentEnd = localRowTarget(groupRows(iSegment, :), "end");
-                localAppendSegment(streams, segmentStart, segmentEnd, groupRows.scanSpeed(iSegment));
+            gateIsOn = false;
+            for segmentIndex = 1:height(rows)
+                requestedGate = string(rows.laserState(segmentIndex)) == "on";
+                if requestedGate ~= gateIsOn
+                    localAppendTriggerState( ...
+                        streams.(triggerAxisName), triggerChannel, requestedGate, config);
+                    gateIsOn = requestedGate;
+                end
+                localAppendSegment(streams, ...
+                    localRowTarget(rows(segmentIndex, :), "start"), ...
+                    localRowTarget(rows(segmentIndex, :), "end"), ...
+                    rows.speed(segmentIndex));
             end
-            localAppendTriggerState(streams.(triggerAxisName), triggerChannel, false, config);
-            localAppendSegment(streams, localRowTarget(groupRows(end, :), "end"), exitTarget, groupRows.leadSpeed(1));
-            localAppendTriggerState(streams.(triggerAxisName), triggerChannel, false, config);
+            if gateIsOn
+                localAppendTriggerState( ...
+                    streams.(triggerAxisName), triggerChannel, false, config);
+            end
 
             streamFields = fieldnames(streams);
             for fieldIndex = 1:numel(streamFields)
@@ -154,10 +152,10 @@ end
             for fieldIndex = 1:numel(streamFields)
                 streams.(streamFields{fieldIndex}).setupLive(1);
             end
-
-            localNotifyLaserState(true);
+            localNotifyLaserState(any(string(rows.laserState) == "on"));
             for fieldIndex = 1:numel(streamFields)
-                streams.(streamFields{fieldIndex}).call(buffers.(streamFields{fieldIndex}));
+                streams.(streamFields{fieldIndex}).call( ...
+                    buffers.(streamFields{fieldIndex}));
             end
 
             while localAnyAxisBusy(state)
@@ -172,12 +170,11 @@ end
                 end
                 pause(0.01);
             end
-
             localDisableStreams(streams);
             try
                 state.currentPosition = lw_get_position(state);
             catch
-                state.currentPosition = exitTarget;
+                state.currentPosition = endTarget;
             end
         catch ME
             localDisableStreams(streams);
@@ -187,29 +184,24 @@ end
 
     function localAppendSegment(streams, fromTarget, toTarget, speedMmPerSecond)
         distanceMm = localDistanceMm(fromTarget, toTarget);
-        if distanceMm <= 1e-12
-            return;
-        end
         durationSeconds = distanceMm / speedMmPerSecond;
-        localAppendAxisAction(streams.x, toTarget.x - fromTarget.x, toTarget.x, durationSeconds);
-        localAppendAxisAction(streams.y, toTarget.y - fromTarget.y, toTarget.y, durationSeconds);
-        localAppendAxisAction(streams.z, toTarget.z - fromTarget.z, toTarget.z, durationSeconds);
+        localAppendAxisAction(streams.x, toTarget.x - fromTarget.x, ...
+            toTarget.x, durationSeconds);
+        localAppendAxisAction(streams.y, toTarget.y - fromTarget.y, ...
+            toTarget.y, durationSeconds);
+        localAppendAxisAction(streams.z, toTarget.z - fromTarget.z, ...
+            toTarget.z, durationSeconds);
     end
 
     function localUpdateProgress(index, target, phase)
-        if isempty(options.progressFcn)
-            return;
+        if ~isempty(options.progressFcn)
+            options.progressFcn(index, groupCount, target, phase);
         end
-        options.progressFcn(index, groupCount, target, phase);
     end
 
     function [wasStopped, wasPaused] = localPauseWithCallbacks(seconds)
         wasStopped = false;
         wasPaused = false;
-        if seconds <= 0
-            return;
-        end
-
         timerStart = tic;
         while toc(timerStart) < seconds
             options.yieldFcn();
@@ -221,8 +213,7 @@ end
                 wasPaused = true;
                 return;
             end
-            remainingSeconds = seconds - toc(timerStart);
-            pause(max(min(remainingSeconds, 0.02), 0));
+            pause(max(min(seconds - toc(timerStart), 0.02), 0));
         end
     end
 
@@ -233,7 +224,6 @@ end
         if ~forceWrite && isequal(laserOutputIsActive, false)
             return;
         end
-
         try
             lw_set_stage_pulse_trigger(state, false, config);
         catch
@@ -247,25 +237,20 @@ end
     end
 
     function localNotifyLaserState(isOn)
-        if isempty(options.laserStateFcn)
-            return;
+        if ~isempty(options.laserStateFcn)
+            options.laserStateFcn(logical(isOn));
         end
-        options.laserStateFcn(logical(isOn));
     end
 end
 
 function localAppendAxisAction(streamHandle, deltaMm, targetValueMm, durationSeconds)
 if abs(deltaMm) <= 1e-9
-    localAppendWait(streamHandle, durationSeconds);
+    streamHandle.wait(durationSeconds, zaber.motion.Units.TIME_SECONDS);
     return;
 end
-
 speedMmPerSecond = max(abs(deltaMm) / durationSeconds, 1e-5);
-streamHandle.setMaxSpeed(speedMmPerSecond, zaber.motion.Units.VELOCITY_MILLIMETRES_PER_SECOND);
-localAppendLine(streamHandle, targetValueMm);
-end
-
-function localAppendLine(streamHandle, targetValueMm)
+streamHandle.setMaxSpeed( ...
+    speedMmPerSecond, zaber.motion.Units.VELOCITY_MILLIMETRES_PER_SECOND);
 measurementValue = zaber.motion.Measurement( ...
     targetValueMm, zaber.motion.Units.LENGTH_MILLIMETRES);
 measurementArray = javaArray('zaber.motion.Measurement', 1);
@@ -277,22 +262,12 @@ catch
 end
 end
 
-function localAppendWait(streamHandle, durationSeconds)
-if durationSeconds <= 0
-    return;
-end
-streamHandle.wait(durationSeconds, zaber.motion.Units.TIME_SECONDS);
-end
-
 function localAppendTriggerState(streamHandle, channelNumber, isActive, config)
 action = lw_stage_pulse_trigger_action(isActive, config);
 streamHandle.setDigitalOutput(channelNumber, action);
 end
 
 function localDisableStreams(streamStruct)
-if isempty(fieldnames(streamStruct))
-    return;
-end
 streamFields = fieldnames(streamStruct);
 for fieldIndex = 1:numel(streamFields)
     try
@@ -305,8 +280,8 @@ end
 function tf = localAnyAxisBusy(state)
 tf = false;
 axisNames = {'x', 'y', 'z'};
-for i = 1:numel(axisNames)
-    axisName = axisNames{i};
+for axisIndex = 1:numel(axisNames)
+    axisName = axisNames{axisIndex};
     if ~isfield(state.axes, axisName) || isempty(state.axes.(axisName))
         continue;
     end
@@ -321,24 +296,17 @@ end
 end
 
 function target = localRowTarget(row, targetName)
-switch string(targetName)
-    case "lead"
-        target = struct('x', row.leadX, 'y', row.leadY, 'z', row.leadZ);
-    case "start"
-        target = struct('x', row.x, 'y', row.y, 'z', row.z);
-    case "end"
-        target = struct('x', row.x2, 'y', row.y2, 'z', row.z2);
-    case "exit"
-        target = struct('x', row.exitX, 'y', row.exitY, 'z', row.exitZ);
-    otherwise
-        error('Unsupported cut target: %s', char(targetName));
+if string(targetName) == "start"
+    target = struct('x', row.x, 'y', row.y, 'z', row.z);
+else
+    target = struct('x', row.x2, 'y', row.y2, 'z', row.z2);
 end
 end
 
-function result = localRunResult(status, nextCutIndex, returnTarget, lastCompletedIndex)
+function result = localRunResult(status, nextPathGroupIndex, returnTarget, lastCompletedIndex)
 result = struct( ...
     'status', string(status), ...
-    'nextCutIndex', nextCutIndex, ...
+    'nextPathGroupIndex', nextPathGroupIndex, ...
     'returnTarget', returnTarget, ...
     'lastCompletedIndex', lastCompletedIndex);
 end
@@ -366,7 +334,6 @@ elseif isfield(config.stage, 'shutterAxis')
 else
     error('Pulse trigger axis is not configured.');
 end
-
 if ~ismember(axisName, {'x', 'y', 'z'})
     error('Pulse trigger axis must be x, y, or z.');
 end
@@ -380,7 +347,6 @@ elseif isfield(config.stage, 'shutterChannel')
 else
     error('Pulse trigger channel is not configured.');
 end
-
 channelNumber = double(channelNumber);
 if ~isscalar(channelNumber) || ~isfinite(channelNumber) || channelNumber < 1
     error('Pulse trigger channel must be a positive integer.');

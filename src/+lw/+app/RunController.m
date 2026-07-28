@@ -73,8 +73,8 @@ classdef RunController < handle
                     preflight = obj.buildPulseRunPreflight();
                 case "Z Sweep Mode"
                     preflight = obj.buildZSweepRunPreflight();
-                case "Cut Plan Mode"
-                    preflight = obj.buildCutPlanRunPreflight();
+                case "Path Plan Mode"
+                    preflight = obj.buildPathPlanRunPreflight();
                 otherwise
                     error('Unsupported run mode: %s', char(runMode));
             end
@@ -229,20 +229,23 @@ classdef RunController < handle
                     options.laserStateFcn = @(isOn) obj.Ports.stageLaser.setLaserState(isOn);
                     runResult = obj.runZSweepJobs(preflight, options, resumeContext);
 
-                case "Cut Plan Mode"
+                case "Path Plan Mode"
                     if isempty(resumeContext)
-                        options.startCutIndex = 1;
-                        obj.Ports.logMessage(sprintf('Cut Plan Mode started with %d cut group(s).', preflight.progressTotal));
+                        options.startPathGroupIndex = 1;
+                        obj.Ports.logMessage(sprintf( ...
+                            'Path Plan Mode started with %d path group(s).', ...
+                            preflight.progressTotal));
                     else
-                        options.startCutIndex = resumeContext.nextCutIndex;
-                        obj.Ports.logMessage(sprintf('Cut Plan Mode resumed at cut group %d of %d.', ...
-                            options.startCutIndex, preflight.progressTotal));
+                        options.startPathGroupIndex = resumeContext.nextPathGroupIndex;
+                        obj.Ports.logMessage(sprintf( ...
+                            'Path Plan Mode resumed at path group %d of %d.', ...
+                            options.startPathGroupIndex, preflight.progressTotal));
                     end
                     options.motion = preflight.motion;
                     options.laserStateFcn = @(isOn) obj.Ports.stageLaser.setLaserState(isOn);
-                    [obj.Model.State, cutResult] = obj.Model.Services.execution.runCutPlan( ...
+                    [obj.Model.State, pathResult] = obj.Model.Services.execution.runPathPlan( ...
                         obj.Model.State, obj.Model.Config, preflight.trajectory, options);
-                    runResult = obj.runResultFromCutPlan(preflight, cutResult);
+                    runResult = obj.runResultFromPathPlan(preflight, pathResult);
 
                 otherwise
                     error('Unsupported run mode: %s', char(runMode));
@@ -263,18 +266,20 @@ classdef RunController < handle
             runResult = obj.makeRunResult(pointResult.status, pointResult.returnTarget, []);
         end
 
-        function runResult = runResultFromCutPlan(obj, preflight, cutResult)
-            if cutResult.status == "paused"
+        function runResult = runResultFromPathPlan(obj, preflight, pathResult)
+            if pathResult.status == "paused"
                 resumeContext = struct( ...
-                    'kind', "cutPlan", ...
-                    'runMode', "Cut Plan Mode", ...
+                    'kind', "pathPlan", ...
+                    'runMode', "Path Plan Mode", ...
                     'preflight', preflight, ...
-                    'nextCutIndex', cutResult.nextCutIndex, ...
-                    'returnTarget', cutResult.returnTarget);
-                runResult = obj.makeRunResult("paused", cutResult.returnTarget, resumeContext);
+                    'nextPathGroupIndex', pathResult.nextPathGroupIndex, ...
+                    'returnTarget', pathResult.returnTarget);
+                runResult = obj.makeRunResult( ...
+                    "paused", pathResult.returnTarget, resumeContext);
                 return;
             end
-            runResult = obj.makeRunResult(cutResult.status, cutResult.returnTarget, []);
+            runResult = obj.makeRunResult( ...
+                pathResult.status, pathResult.returnTarget, []);
         end
 
         function runResult = runZSweepJobs(obj, preflight, options, resumeContext)
@@ -591,9 +596,10 @@ classdef RunController < handle
                         stepIndex = double(resumeContext.stepIndex);
                     end
                     completedUnits = max(0, progressOffset + stepIndex - 1);
-                case "cutPlan"
-                    if isfield(resumeContext, 'nextCutIndex')
-                        completedUnits = max(0, double(resumeContext.nextCutIndex) - 1);
+                case "pathPlan"
+                    if isfield(resumeContext, 'nextPathGroupIndex')
+                        completedUnits = max( ...
+                            0, double(resumeContext.nextPathGroupIndex) - 1);
                     end
             end
         end
@@ -613,7 +619,7 @@ classdef RunController < handle
                 case "zSweep"
                     jobIndex = min(resumeContext.jobIndex, numel(resumeContext.preflight.sweepJobs));
                     motion = resumeContext.preflight.sweepJobs(jobIndex).sweep.preMoveMotion;
-                case "cutPlan"
+                case "pathPlan"
                     motion = resumeContext.preflight.motion;
                 otherwise
                     motion = obj.Ports.stageLaser.readAbsoluteMotion();
@@ -654,10 +660,14 @@ classdef RunController < handle
         end
 
         function target = firstRunTargetForCurrentMode(obj)
-            if obj.selectedRunMode() == "Cut Plan Mode" && isfield(obj.Model.Trajectory, 'cutPlan') && ...
-                    istable(obj.Model.Trajectory.cutPlan) && any(string(obj.Model.Trajectory.cutPlan.mode) == "cut")
-                cutRows = obj.Model.Trajectory.cutPlan(string(obj.Model.Trajectory.cutPlan.mode) == "cut", :);
-                target = struct('x', cutRows.leadX(1), 'y', cutRows.leadY(1), 'z', cutRows.leadZ(1));
+            if obj.selectedRunMode() == "Path Plan Mode" && ...
+                    isfield(obj.Model.Trajectory, 'writingPlan') && ...
+                    istable(obj.Model.Trajectory.writingPlan) && ...
+                    any(string(obj.Model.Trajectory.writingPlan.operation) == "path")
+                pathRows = obj.Model.Trajectory.writingPlan( ...
+                    string(obj.Model.Trajectory.writingPlan.operation) == "path", :);
+                target = struct( ...
+                    'x', pathRows.x(1), 'y', pathRows.y(1), 'z', pathRows.z(1));
                 return;
             end
 
@@ -767,36 +777,38 @@ classdef RunController < handle
                 formatCarbideSnapshot(preflight.carbideSnapshot), obj.Ports.carbide.autoStandbyAfterRunSummaryText());
         end
 
-        function preflight = buildCutPlanRunPreflight(obj)
+        function preflight = buildPathPlanRunPreflight(obj)
             obj.requireTrajectoryLoaded();
             obj.Ports.stageLaser.requireStagesConnected();
             obj.Ports.stageLaser.requireDAQConnected();
 
-            if obj.selectedRunMode() ~= "Cut Plan Mode"
-                error('Select Cut Plan Mode to run writing-plan cut rows.');
+            if obj.selectedRunMode() ~= "Path Plan Mode"
+                error('Select Path Plan Mode to run writing-plan path segments.');
             end
-            if ~supportsMode(obj.Model.Trajectory, "cut")
-                error('The current plan does not contain cut rows.');
+            if ~supportsMode(obj.Model.Trajectory, "path")
+                error('The current plan does not contain path segments.');
             end
-            if ~isfield(obj.Model.Trajectory, 'cutPlan') || ~istable(obj.Model.Trajectory.cutPlan)
-                error('Cut Plan Mode requires a writing plan imported from CSV.');
+            if ~isfield(obj.Model.Trajectory, 'writingPlan') || ...
+                    ~istable(obj.Model.Trajectory.writingPlan)
+                error('Path Plan Mode requires a writing plan imported from CSV.');
             end
 
-            planModes = string(obj.Model.Trajectory.cutPlan.mode);
-            if any(planModes ~= "cut")
-                error('Cut Plan Mode currently requires every writing-plan row to use mode=cut.');
+            operations = string(obj.Model.Trajectory.writingPlan.operation);
+            if any(operations ~= "path")
+                error(['Path Plan Mode requires every writing-plan row ', ...
+                    'to use operation=path.']);
             end
 
             preflight = struct();
             preflight.motion = obj.Ports.stageLaser.readAbsoluteMotion();
             preflight.trajectory = obj.Model.Trajectory;
-            preflight.cutPlan = preflight.trajectory.cutPlan;
-            preflight.cutGroups = lw_validate_cut_plan_rows_for_run(preflight.cutPlan);
-            preflight.progressTotal = numel(preflight.cutGroups);
+            preflight.writingPlan = preflight.trajectory.writingPlan;
+            preflight.pathGroups = lw_validate_path_plan_for_run(preflight.writingPlan);
+            preflight.progressTotal = numel(preflight.pathGroups);
             preflight.analysis = obj.analyzeTrajectoryForExecution(preflight.trajectory);
             obj.validateTrajectoryForRun(preflight.trajectory);
             preflight.carbideSnapshot = obj.Ports.carbide.currentCarbideSnapshot();
-            preflight.summaryText = lw_build_cut_plan_preflight_summary_text( ...
+            preflight.summaryText = lw_build_path_plan_preflight_summary_text( ...
                 preflight, obj.selectedRunMode(), obj.Ports.stageLaser.areStagesConnected(), obj.Ports.stageLaser.areDAQConnected(), ...
                 formatCarbideSnapshot(preflight.carbideSnapshot), obj.Ports.carbide.autoStandbyAfterRunSummaryText());
         end
@@ -1240,11 +1252,13 @@ classdef RunController < handle
                     obj.Model.Ui.RunParameterHintLabel.Text = ...
                         ['Stream Mode uses constant plan power and a timed level gate at each point; ', ...
                         'it does not guarantee one optical pulse per gate.'];
-                case "Cut Plan Mode"
+                case "Path Plan Mode"
                     rowHeights = repmat({0}, 1, 17);
                     rowHeights([16, 17]) = {'fit'};
                     obj.Model.Ui.RunParameterGrid.RowHeight = rowHeights;
-                    obj.Model.Ui.RunParameterHintLabel.Text = 'Cut Plan Mode uses plan power, cut speed, lead speed, and lead-in/out coordinates.';
+                    obj.Model.Ui.RunParameterHintLabel.Text = ...
+                        ['Path Plan Mode uses each segment''s explicit laser state, ', ...
+                        'speed, and start/end coordinates.'];
                 otherwise
                     rowHeights = repmat({0}, 1, 17);
                     rowHeights([2, 3, 4, 5, 6, 7, 8, 16, 17]) = {'fit'};
@@ -1351,9 +1365,10 @@ classdef RunController < handle
                 error('The loaded plan must contain one execution power value per point.');
             end
             validatePowerPercentValues(traj.power, 'Plan execution power');
-            if isfield(traj, 'cutPlan') && istable(traj.cutPlan) && ...
-                    ismember('power', traj.cutPlan.Properties.VariableNames)
-                validatePowerPercentValues(traj.cutPlan.power, 'Cut plan execution power');
+            if isfield(traj, 'writingPlan') && istable(traj.writingPlan) && ...
+                    ismember('power', traj.writingPlan.Properties.VariableNames)
+                validatePowerPercentValues( ...
+                    traj.writingPlan.power, 'Writing plan execution power');
             end
             analysis = obj.analyzeTrajectoryForExecution(traj);
             if ~analysis.inBounds

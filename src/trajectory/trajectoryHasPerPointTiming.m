@@ -3,15 +3,15 @@ function tf = trajectoryHasPerPointTiming(trajectory)
 
 tf = false;
 if isempty(trajectory) || ~isstruct(trajectory) || ...
-        ~isfield(trajectory, 'cutPlan') || ~istable(trajectory.cutPlan) || ...
-        height(trajectory.cutPlan) == 0
+        ~isfield(trajectory, 'writingPlan') || ~istable(trajectory.writingPlan) || ...
+        height(trajectory.writingPlan) == 0
     return;
 end
 
-requiredNames = {'mode', 'dwell', 'pauseSeconds'};
-if ~all(ismember(requiredNames, trajectory.cutPlan.Properties.VariableNames))
+requiredNames = {'operation', 'dwell', 'pauseSeconds'};
+if ~all(ismember(requiredNames, trajectory.writingPlan.Properties.VariableNames))
     return;
 end
 
-tf = all(string(trajectory.cutPlan.mode) == "point");
+tf = all(string(trajectory.writingPlan.operation) == "point");
 end

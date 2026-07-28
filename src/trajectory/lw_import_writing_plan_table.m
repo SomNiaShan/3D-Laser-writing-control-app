@@ -1,14 +1,28 @@
-function trajectory = lw_import_writing_plan_table(filename)
+function trajectory = lw_import_writing_plan_table(filename, useFixedPower, fixedPower)
 %LW_IMPORT_WRITING_PLAN_TABLE Import Point Cloud Generator writing-plan CSV files.
+
+if nargin < 2
+    useFixedPower = false;
+end
+if nargin < 3
+    fixedPower = nan;
+end
+[useFixedPower, fixedPower] = localFixedPowerOptions(useFixedPower, fixedPower);
 
 rawTable = localReadDelimitedTextTable(filename);
 if isempty(rawTable) || height(rawTable) == 0
     error('Writing plan file is empty.');
 end
 
+actualNames = string(rawTable.Properties.VariableNames);
+if all(ismember(["schema_version", "operation"], actualNames))
+    trajectory = lw_import_writing_plan_v2_table( ...
+        rawTable, filename, useFixedPower, fixedPower);
+    return;
+end
+
 requiredNames = ["mode", "x_mm", "y_mm", "z_mm", "x2_mm", "y2_mm", "z2_mm", ...
     "power", "dwell_s", "scan_speed_mm_s", "pause_s"];
-actualNames = string(rawTable.Properties.VariableNames);
 missingNames = setdiff(requiredNames, actualNames, 'stable');
 if ~isempty(missingNames)
     error('Writing plan file is missing columns: %s.', strjoin(missingNames, ', '));
@@ -22,7 +36,13 @@ z = localNumericColumn(rawTable.z_mm, 'z_mm');
 x2 = localNumericColumn(rawTable.x2_mm, 'x2_mm');
 y2 = localNumericColumn(rawTable.y2_mm, 'y2_mm');
 z2 = localNumericColumn(rawTable.z2_mm, 'z2_mm');
-power = localNumericColumn(rawTable.power, 'power');
+if useFixedPower
+    power = repmat(fixedPower, rowCount, 1);
+    powerSource = "fixed_override";
+else
+    power = localNumericColumn(rawTable.power, 'power');
+    powerSource = "file";
+end
 dwell = localNumericColumn(rawTable.dwell_s, 'dwell_s');
 scanSpeed = localNumericColumn(rawTable.scan_speed_mm_s, 'scan_speed_mm_s');
 pauseSeconds = localNumericColumn(rawTable.pause_s, 'pause_s');
@@ -39,10 +59,12 @@ cutMask = mode == "cut";
 if any(~isfinite(x) | ~isfinite(y) | ~isfinite(z))
     error('Writing plan x_mm, y_mm, and z_mm columns must be finite.');
 end
-if any(~isfinite(power))
-    error('Writing plan power column must be finite.');
+if ~useFixedPower
+    if any(~isfinite(power))
+        error('Writing plan power column must be finite.');
+    end
+    power = validatePowerPercentValues(power, 'Writing plan power column');
 end
-power = validatePowerPercentValues(power, 'Writing plan power column');
 if any(isfinite(pauseSeconds) & pauseSeconds < 0)
     error('Writing plan pause_s values cannot be negative.');
 end
@@ -71,31 +93,40 @@ if any(pointMask) && any(~isfinite(dwell(pointMask)) | dwell(pointMask) < 0)
     error('Point rows must contain nonnegative dwell_s values.');
 end
 
-plan = table(mode, x, y, z, x2, y2, z2, power, dwell, scanSpeed, pauseSeconds, ...
+legacyPlan = table(mode, x, y, z, x2, y2, z2, power, dwell, scanSpeed, pauseSeconds, ...
     leadX, leadY, leadZ, exitX, exitY, exitZ, leadSpeed, cutGroupId, cutGroupSegment, ...
     'VariableNames', {'mode', 'x', 'y', 'z', 'x2', 'y2', 'z2', ...
     'power', 'dwell', 'scanSpeed', 'pauseSeconds', ...
     'leadX', 'leadY', 'leadZ', 'exitX', 'exitY', 'exitZ', ...
     'leadSpeed', 'cutGroupId', 'cutGroupSegment'});
 
-if any(cutMask)
-    lw_validate_cut_plan_rows_for_run(plan);
-    modeSupport = "cut";
-elseif any(pointMask)
-    modeSupport = "point+stream";
-else
-    modeSupport = "stream";
+canonicalTable = localLegacyToCanonicalTable(legacyPlan);
+trajectory = lw_import_writing_plan_v2_table( ...
+    canonicalTable, filename, false, nan);
+trajectory.meta.sourceSchemaVersion = 1;
+trajectory.meta.powerSource = powerSource;
+trajectory.meta.fixedPowerOverride = useFixedPower;
+trajectory.meta.pointTimingSource = "legacy_writing_plan";
+if useFixedPower
+    trajectory.meta.fixedPowerPercent = fixedPower;
+end
 end
 
-meta = struct( ...
-    'filename', filename, ...
-    'powerSource', "file", ...
-    'pointTimingSource', "writing_plan", ...
-    'pointCount', nnz(mode == "point"), ...
-    'scanCount', nnz(mode == "scan"), ...
-    'cutCount', nnz(mode == "cut"));
-trajectory = lw_make_trajectory(x, y, z, power, "writing_plan", modeSupport, meta);
-trajectory.cutPlan = plan;
+function [useFixedPower, fixedPower] = localFixedPowerOptions(useFixedPower, fixedPower)
+isBooleanScalar = (islogical(useFixedPower) || isnumeric(useFixedPower)) && ...
+    isreal(useFixedPower) && isscalar(useFixedPower) && isfinite(useFixedPower) && ...
+    any(double(useFixedPower) == [0, 1]);
+if ~isBooleanScalar
+    error('lw:InvalidFixedPowerOverride', ...
+        'Use Fixed Power must be a scalar logical value.');
+end
+
+useFixedPower = logical(useFixedPower);
+if useFixedPower
+    fixedPower = validatePowerPercent(fixedPower, 'Fixed power override');
+else
+    fixedPower = nan;
+end
 end
 
 function modes = localNormalizeModes(value)
@@ -188,6 +219,140 @@ badMask = ~isfinite(values) | values < 1 | abs(values - round(values)) > 1e-9;
 if any(badMask)
     error('%s values must be positive integers.', columnName);
 end
+end
+
+function canonicalTable = localLegacyToCanonicalTable(legacyPlan)
+modes = string(legacyPlan.mode);
+pointMask = modes == "point";
+pathMask = ~pointMask;
+if any(pointMask) && any(pathMask)
+    error('Legacy writing plans cannot mix point and path operations.');
+end
+
+if all(pointMask)
+    rowCount = height(legacyPlan);
+    canonicalTable = localCanonicalTable( ...
+        repmat("point", rowCount, 1), nan(rowCount, 1), nan(rowCount, 1), ...
+        repmat("dwell", rowCount, 1), ...
+        legacyPlan.x, legacyPlan.y, legacyPlan.z, ...
+        nan(rowCount, 1), nan(rowCount, 1), nan(rowCount, 1), nan(rowCount, 1), ...
+        legacyPlan.power, legacyPlan.dwell, legacyPlan.pauseSeconds, ...
+        repmat("legacy_point", rowCount, 1));
+    return;
+end
+
+blocks = cell(height(legacyPlan), 1);
+blockCount = 0;
+nextGroupId = 1;
+rowIndex = 1;
+seenSourceGroupIds = zeros(0, 1);
+while rowIndex <= height(legacyPlan)
+    if modes(rowIndex) == "scan"
+        row = legacyPlan(rowIndex, :);
+        block = localCanonicalTable( ...
+            "path", nextGroupId, 1, "on", row.x, row.y, row.z, ...
+            row.x2, row.y2, row.z2, row.scanSpeed, row.power, nan, ...
+            row.pauseSeconds, "legacy_axis_path");
+        rowIndex = rowIndex + 1;
+    else
+        sourceGroupId = legacyPlan.cutGroupId(rowIndex);
+        if ~isfinite(sourceGroupId)
+            sourceGroupId = rowIndex;
+        end
+        if any(seenSourceGroupIds == sourceGroupId)
+            error('Legacy path group %g reappears after another operation.', sourceGroupId);
+        end
+        seenSourceGroupIds(end + 1, 1) = sourceGroupId; %#ok<AGROW>
+        groupEnd = rowIndex;
+        while groupEnd < height(legacyPlan) && modes(groupEnd + 1) == "cut" && ...
+                legacyPlan.cutGroupId(groupEnd + 1) == sourceGroupId
+            groupEnd = groupEnd + 1;
+        end
+        block = localLegacyPathGroup( ...
+            legacyPlan(rowIndex:groupEnd, :), nextGroupId);
+        rowIndex = groupEnd + 1;
+    end
+    blockCount = blockCount + 1;
+    blocks{blockCount} = block;
+    nextGroupId = nextGroupId + 1;
+end
+canonicalTable = vertcat(blocks{1:blockCount});
+end
+
+function block = localLegacyPathGroup(rows, groupId)
+rowCount = height(rows);
+if any(rows.cutGroupSegment ~= (1:rowCount).')
+    error('Legacy path group %g segment indexes must be 1..N.', groupId);
+end
+if rowCount > 1
+    deltas = abs([rows.x2(1:end - 1) - rows.x(2:end), ...
+        rows.y2(1:end - 1) - rows.y(2:end), ...
+        rows.z2(1:end - 1) - rows.z(2:end)]);
+    if any(max(deltas, [], 2) > 1e-6)
+        error('Legacy path group %g contains discontinuous segments.', groupId);
+    end
+end
+localRequireConstant(rows.power, 'power', groupId);
+localRequireConstant(rows.leadSpeed, 'lead speed', groupId);
+localRequireConstant(rows.pauseSeconds, 'pause', groupId);
+
+approachStart = [rows.leadX(1), rows.leadY(1), rows.leadZ(1)];
+pathStart = [rows.x(1), rows.y(1), rows.z(1)];
+pathEnd = [rows.x2(end), rows.y2(end), rows.z2(end)];
+departureEnd = [rows.exitX(end), rows.exitY(end), rows.exitZ(end)];
+hasApproach = norm(approachStart - pathStart) > 1e-12;
+hasDeparture = norm(departureEnd - pathEnd) > 1e-12;
+outputCount = double(hasApproach) + rowCount + double(hasDeparture);
+
+laserState = repmat("on", outputCount, 1);
+startCoordinates = zeros(outputCount, 3);
+endCoordinates = zeros(outputCount, 3);
+speed = zeros(outputCount, 1);
+offset = 0;
+if hasApproach
+    offset = 1;
+    laserState(1) = "off";
+    startCoordinates(1, :) = approachStart;
+    endCoordinates(1, :) = pathStart;
+    speed(1) = rows.leadSpeed(1);
+end
+pathRows = offset + (1:rowCount);
+startCoordinates(pathRows, :) = [rows.x, rows.y, rows.z];
+endCoordinates(pathRows, :) = [rows.x2, rows.y2, rows.z2];
+speed(pathRows) = rows.scanSpeed;
+if hasDeparture
+    laserState(end) = "off";
+    startCoordinates(end, :) = pathEnd;
+    endCoordinates(end, :) = departureEnd;
+    speed(end) = rows.leadSpeed(1);
+end
+
+block = localCanonicalTable( ...
+    repmat("path", outputCount, 1), repmat(groupId, outputCount, 1), ...
+    (1:outputCount).', laserState, ...
+    startCoordinates(:, 1), startCoordinates(:, 2), startCoordinates(:, 3), ...
+    endCoordinates(:, 1), endCoordinates(:, 2), endCoordinates(:, 3), speed, ...
+    repmat(rows.power(1), outputCount, 1), nan(outputCount, 1), ...
+    repmat(rows.pauseSeconds(1), outputCount, 1), ...
+    repmat("legacy_path", outputCount, 1));
+end
+
+function localRequireConstant(values, label, groupId)
+if max(abs(values(:) - values(1))) > 1e-9
+    error('Legacy path group %g must have constant %s.', groupId, label);
+end
+end
+
+function plan = localCanonicalTable(operation, groupId, segmentIndex, laserState, ...
+        x, y, z, x2, y2, z2, speed, power, dwell, pauseSeconds, sourceRecipe)
+rowCount = numel(operation);
+plan = table( ...
+    repmat(2, rowCount, 1), string(operation(:)), groupId(:), segmentIndex(:), ...
+    string(laserState(:)), x(:), y(:), z(:), x2(:), y2(:), z2(:), ...
+    speed(:), power(:), dwell(:), pauseSeconds(:), string(sourceRecipe(:)), ...
+    'VariableNames', {'schema_version', 'operation', 'group_id', 'segment_index', ...
+    'laser_state', 'x_mm', 'y_mm', 'z_mm', 'x2_mm', 'y2_mm', 'z2_mm', ...
+    'speed_mm_s', 'power', 'dwell_s', 'pause_s', 'source_recipe'});
 end
 
 function rawTable = localReadDelimitedTextTable(filename)

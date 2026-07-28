@@ -41,8 +41,9 @@ before enabling any output.
   sub-100-us and non-100-us-multiple dwell values are rejected at preflight.
 - Stream Mode: start, STOP, normal finish, trigger-rate validation, and error
   recovery.
-- Cut Plan Mode: preflight, pre-write settling at each lead-in position,
-  grouped execution, STOP, and output comparison.
+- Path Plan Mode: preflight, settling at each group start, explicit
+  laser-on/off segment execution, pause/resume by group, STOP, and output
+  comparison.
 - Z Sweep: single and matrix previews, start, pause, resume, STOP, Zaber
   reconnect recovery, and return-position behavior.
 - Single imaging: capture stack, auto exposure, STOP during move/settle/capture,

@@ -43,8 +43,8 @@ Run lifecycle stress and the locked screenshot comparison with:
 report = run_refactor_checks(IncludeStress=true, IncludeScreenshots=true);
 ```
 
-The locked GUI contract is 527 objects with normalized signature SHA-256
-`d3e089b229289266edaadd6820f3094987982a03be3f877cdbb74daa53f0aa37`.
+The locked GUI contract is 528 objects with normalized signature SHA-256
+`5c4dad2270f7111926928bbc2836e50f1d95449cb55f5e954a745f840b02f717`.
 Mako device-discovery availability is normalized because it is runtime
 hardware state rather than a static GUI property.
 
@@ -52,16 +52,26 @@ hardware state rather than a static GUI property.
 
 Loaded plans carry their final execution power in `trajectory.power`; preview,
 preflight, logging, and execution all use that same snapshot. Frame and Mark
-Text power is set on the Plan tab. XYZ-only point files use the Plan tab's
-fixed power, while XYZP and writing-plan files always use their power column.
+Text power is set on the Plan tab. Imported points and writing plans use their
+file power by default. When `Use Fixed Power (%)` is selected before import,
+every imported operation instead uses the adjacent fixed power value.
 Stream Mode accepts only plans whose stored power is constant. Sweep Power is
 separate and is used only by Z Sweep Mode. Manual power fields on the Control
 tab never modify a loaded plan.
 
+Writing-plan v2 files use `operation=point|path`. Path files contain explicit
+laser-on and laser-off segments grouped by `group_id`. Generation, placement,
+leveling, preview, preflight, execution, recovery, and logging all retain that
+same canonical segment table in `trajectory.writingPlan`; there is no separate
+scan or cut execution representation. A former axis scan is simply one
+laser-on path segment, while approach and departure motion are ordinary
+laser-off segments. Legacy `mode=point|scan|cut` files remain supported only
+at the import boundary, where they are converted immediately to the v2 model.
+
 ## Point timing semantics
 
 Point Mode is a timed-dwell workflow, not a single-pulse workflow. For an
-imported writing plan, each `mode=point` row's `dwell_s` and `pause_s` values
+imported writing plan, each `operation=point` row's `dwell_s` and `pause_s` values
 are canonical: the stage moves to the point, waits for `pause_s`, and then
 uses a Zaber firmware-scheduled digital-output gate for `dwell_s`. Run-tab
 Default Dwell and Default Settle values are used only by trajectories that do

@@ -1,20 +1,19 @@
-function [previewRows, isSampled] = lw_cut_plan_preview_rows(cutRows, maxRows)
-%LW_CUT_PLAN_PREVIEW_ROWS Sample cut rows while preserving cut groups.
+function [previewRows, isSampled] = lw_path_plan_preview_rows(pathRows, maxRows)
+%LW_PATH_PLAN_PREVIEW_ROWS Sample complete path groups for preview.
 
 if nargin < 2 || isempty(maxRows)
-    maxRows = height(cutRows);
+    maxRows = height(pathRows);
 end
 maxRows = max(1, round(double(maxRows)));
 isSampled = false;
-
-if height(cutRows) <= maxRows
-    previewRows = cutRows;
+if height(pathRows) <= maxRows
+    previewRows = pathRows;
     return;
 end
 
-groups = lw_cut_plan_groups(cutRows);
+groups = lw_path_plan_groups(pathRows);
 if isempty(groups)
-    previewRows = cutRows([], :);
+    previewRows = pathRows([], :);
     return;
 end
 
@@ -28,14 +27,12 @@ while selectedGroupCount > 1
     end
     selectedGroupCount = max(1, floor(selectedGroupCount / 2));
 end
-
-middleGroup = max(1, round(numel(groups) / 2));
-previewRows = groups(middleGroup).rows;
+previewRows = groups(max(1, round(numel(groups) / 2))).rows;
 end
 
 function rows = localRowsForGroups(groups, groupIndices)
 rows = groups(groupIndices(1)).rows;
-for i = 2:numel(groupIndices)
-    rows = [rows; groups(groupIndices(i)).rows]; %#ok<AGROW>
+for index = 2:numel(groupIndices)
+    rows = [rows; groups(groupIndices(index)).rows]; %#ok<AGROW>
 end
 end

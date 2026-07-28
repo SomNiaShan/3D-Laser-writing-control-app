@@ -50,7 +50,7 @@ classdef TestPointModeTiming < matlab.unittest.TestCase
             path = writePlan(testCase, NaN, 0.1, "scan");
             trajectory = lw_import_writing_plan_table(path);
 
-            testCase.verifyEqual(string(trajectory.modeSupport), "stream");
+            testCase.verifyEqual(string(trajectory.modeSupport), "path");
             testCase.verifyFalse(supportsMode(trajectory, "point"));
         end
 
