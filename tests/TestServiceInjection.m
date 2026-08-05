@@ -21,6 +21,7 @@ classdef TestServiceInjection < matlab.unittest.TestCase
             testCase.verifyTrue(isa(services.stage.home, 'function_handle'));
             testCase.verifyTrue(isa(services.flir.capture, 'function_handle'));
             testCase.verifyTrue(isa(services.dialog.confirm, 'function_handle'));
+            testCase.verifyTrue(isa(services.dialog.prompt, 'function_handle'));
         end
 
         function closeUsesInjectedServices(testCase)

@@ -671,8 +671,20 @@ classdef RunController < handle
                 return;
             end
 
+            if ~analysis.inBounds
+                obj.Model.Services.dialog.alert(obj.Model.Figure, summaryText, 'Check Bounds');
+                return;
+            end
+
+            speedMmPerSecond = obj.promptBoundsCheckSpeed();
+            if isempty(speedMmPerSecond)
+                obj.Ports.logMessage('Check Bounds corner move cancelled before motion.');
+                return;
+            end
+
             choice = string(obj.Model.Services.dialog.confirm(obj.Model.Figure, ...
-                sprintf('%s\n\nMove bounding box corners without laser?', summaryText), ...
+                sprintf(['%s\n\nMove bounding box corners without laser ', ...
+                    'at %.3g mm/s?'], summaryText, speedMmPerSecond), ...
                 'Check Bounds', ...
                 'Options', {'Move Corners', 'Close'}, ...
                 'DefaultOption', 'Close', ...
@@ -682,12 +694,30 @@ classdef RunController < handle
                 return;
             end
 
-            if ~analysis.inBounds
-                error('Check Bounds move cancelled: the current plan extends outside the allowed travel range.');
+            obj.executeMotionTargetsNoLaser("Check Bounds", ...
+                boundingBoxCornerTargets(analysis, obj.Model.Config.motion.yDisplayReference), ...
+                "Bounds corner", speedMmPerSecond);
+        end
+
+        function speedMmPerSecond = promptBoundsCheckSpeed(obj)
+            defaultSpeed = obj.Model.Config.motion.defaultManualVelocity;
+            defaultSpeed = min([defaultSpeed.x, defaultSpeed.y, defaultSpeed.z]);
+            defaultText = sprintf('%.3g', defaultSpeed);
+            answer = obj.Model.Services.dialog.prompt( ...
+                {'Move speed (mm/s):'}, ...
+                'Check Bounds Move Speed', ...
+                [1, 35], ...
+                {defaultText});
+            if isempty(answer)
+                speedMmPerSecond = [];
+                return;
             end
 
-            obj.executeMotionTargetsNoLaser("Check Bounds", ...
-                boundingBoxCornerTargets(analysis, obj.Model.Config.motion.yDisplayReference), "Bounds corner");
+            if iscell(answer)
+                answer = answer{1};
+            end
+            speedMmPerSecond = positiveScalar( ...
+                str2double(string(answer)), 'Check Bounds move speed');
         end
 
         function preflight = buildPointRunPreflight(obj)
@@ -788,7 +818,10 @@ classdef RunController < handle
             sweep.pollIntervalSeconds = 0.05;
         end
 
-        function executeMotionTargetsNoLaser(obj, actionLabel, targets, statusPrefix)
+        function executeMotionTargetsNoLaser(obj, actionLabel, targets, statusPrefix, speedMmPerSecond)
+            if nargin < 5
+                speedMmPerSecond = [];
+            end
             total = numel(targets);
             if total < 1
                 return;
@@ -806,6 +839,14 @@ classdef RunController < handle
 
             try
                 motion = obj.Ports.stageLaser.readAbsoluteMotion();
+                if ~isempty(speedMmPerSecond)
+                    speedMmPerSecond = positiveScalar( ...
+                        speedMmPerSecond, sprintf('%s move speed', char(actionLabel)));
+                    motion.velocity = struct( ...
+                        'x', speedMmPerSecond, ...
+                        'y', speedMmPerSecond, ...
+                        'z', speedMmPerSecond);
+                end
                 obj.Ports.stageLaser.forceLaserSafeOff();
 
                 for i = 1:total
