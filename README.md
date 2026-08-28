@@ -43,7 +43,7 @@ Run lifecycle stress and the locked screenshot comparison with:
 report = run_refactor_checks(IncludeStress=true, IncludeScreenshots=true);
 ```
 
-The locked GUI contract is 514 objects. Its normalized signature is recorded
+The locked GUI contract is 516 objects. Its normalized signature is recorded
 in `tests/TestLaserWritingAppBaseline.m`.
 Mako device-discovery availability is normalized because it is runtime
 hardware state rather than a static GUI property.
@@ -95,6 +95,27 @@ not a multiple of 100 us, are rejected instead of rounded.
 A zero point dwell is retained as an explicit no-exposure point. The trigger
 polarity is safety-critical and is set explicitly by
 `config.stage.pulseTriggerActiveHigh`.
+
+## Manual Exposure timing semantics
+
+The Control tab intentionally provides two implementations using the same
+fields. `Fire Exposure` preserves the original compatibility path: MATLAB
+starts each firmware-timed exposure separately and performs Interval waits on
+the host. UI drawing, position reads, and timer callbacks can therefore add
+latency between repeats. `Fire Stream` stores the complete repeat sequence in
+one Zaber device-side stream before it starts. Each repeat schedules its own
+hardware-timed OFF edge; stream waits determine the next ON edge. MATLAB only
+monitors progress and STOP after playback begins, so host work does not
+stretch the stored ON/OFF timeline. Exposure Power is written to the DAQ once
+before stream playback and remains fixed while PP_EN is gated.
+
+For `Fire Stream` with `Repeat > 1`, `Exposure + Interval` must be at least
+1 ms and an exact multiple of 1 ms, because the Zaber stream wait command uses
+integer milliseconds. Exposure itself must still be a multiple of 100 us.
+Values that cannot be represented exactly are rejected rather than rounded.
+Buffer setup adds a variable button-to-first-light delay, but does not change
+the stored ON/OFF timeline. The pulse-trigger stage must be homed and idle
+before stream playback.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) before changing controller ownership.
 Physical-device validation remains a supervised lab step documented in

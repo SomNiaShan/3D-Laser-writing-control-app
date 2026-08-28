@@ -81,10 +81,15 @@ consume those same vectors. Plan-tab Default Dwell and Default Settle are
 frozen fallbacks only for trajectories without writing-plan timing.
 
 Positive point dwell durations must be representable by the configured Zaber
-digital-output scheduler. Point and manual exposures use the device's
-scheduled active-to-inactive action; MATLAB waits only to coordinate UI, STOP,
-and the next operation. Logical active/inactive requests are mapped to
-electrical ON/OFF through the explicitly configured trigger polarity.
+digital-output scheduler. Point exposures and the original Manual Exposure
+path use one device-scheduled active-to-inactive action per exposure; the
+original path performs repeat intervals on the MATLAB host. The separate
+Manual Stream Exposure path stores the complete repeat sequence in one
+device-side stream: each repeat has a scheduled inactive edge, while
+integer-millisecond stream waits place later active edges. MATLAB only
+coordinates UI and STOP after stream playback begins. Logical active/inactive
+requests are mapped to electrical ON/OFF through the explicitly configured
+trigger polarity.
 
 ## Safety sequence
 

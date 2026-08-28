@@ -24,6 +24,23 @@ before enabling any output.
   width, and repeated-gate jitter. Confirm Zaber and CARBIDE grounds are common.
 - NI DAQ / laser: connect, laser on/off indication, one supervised manual
   exposure, STOP during exposure, and measured zero output after STOP.
+- `Fire Stream` (laser disabled or disconnected from PP_EN): home the
+  pulse-trigger stage, request Exposure = 1 s, Interval = 1 s, Repeat = 2, and
+  scope D12 pin 1 relative to pin 4. Confirm edges at 0/1/2/3 s relative to the
+  first edge: active 1 s, inactive 1 s, active 1 s. Repeat at least 20 times and
+  record pulse-width, gap, and start-to-start jitter. Treat button-to-first-edge
+  buffer preparation latency as a separate measurement. Run the same fields
+  once with `Fire Exposure` and retain the trace as the compatibility-path
+  comparison.
+- Manual Exposure stream boundaries: verify 100 us Exposure + 900 us Interval
+  repeats correctly; verify 100 us Exposure + 100 ms Interval is rejected
+  before any pulse because the 100.1 ms cycle is not exactly representable by
+  the stream wait. Confirm the DAQ power voltage is constant during a valid
+  sequence.
+- Manual Exposure STOP: press STOP during buffer preparation, during an active
+  pulse, and during an interval. Confirm no later repeat starts, the stream is
+  no longer busy, PP_EN is inactive, and DAQ measures zero. Repeat once using
+  window close. A failure of any one of these checks blocks use with the laser.
 - Carbide: connect, poll, preset download/apply, PP divider, output enable,
   close output, standby, timer restart, disconnect, and reconnect.
 - FLIR: enumerate, connect, exposure/gain, test capture, live start/stop,

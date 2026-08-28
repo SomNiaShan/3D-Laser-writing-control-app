@@ -428,6 +428,14 @@ classdef StageLaserController < handle
             obj.Ports.runUiAction(@() obj.fireExposureImpl(), 'Failed during manual exposure');
         end
 
+        function onFireStreamExposure(obj, ~, ~)
+            if obj.Model.State.isBusy || obj.Model.State.isPaused
+                return;
+            end
+            obj.Ports.runUiAction(@() obj.fireStreamExposureImpl(), ...
+                'Failed during stream manual exposure');
+        end
+
         function fireExposureImpl(obj)
             obj.requireLaserReady();
             exposureMicroseconds = lw_validate_stage_schedule_duration_us( ...
@@ -478,6 +486,63 @@ classdef StageLaserController < handle
             end
 
             obj.finishManualBusy();
+        end
+
+        function fireStreamExposureImpl(obj)
+            obj.requireLaserReady();
+            exposureMicroseconds = lw_validate_stage_schedule_duration_us( ...
+                positiveScalar(obj.Model.Ui.ExposureTimeField.Value, 'Exposure time'), ...
+                obj.Model.Config, 'Manual exposure duration', false);
+            exposureSeconds = exposureMicroseconds .* 1e-6;
+            repeatCount = positiveInteger(obj.Model.Ui.ExposureRepeatField.Value, 'Repeat count');
+            intervalSeconds = nonnegativeScalar(obj.Model.Ui.ExposureIntervalField.Value, 'Interval');
+            powerPercent = obj.Model.Ui.PreviewPowerField.Value;
+
+            % Validate representability before entering the busy state or
+            % touching hardware. Stream timing is never rounded silently.
+            lw_manual_exposure_stream_plan( ...
+                exposureSeconds, repeatCount, intervalSeconds, obj.Model.Config);
+
+            obj.Model.State.stopRequested = false;
+            obj.Model.State.isBusy = true;
+            obj.Model.RunProgressText = sprintf('0 / %d', repeatCount);
+            obj.Model.RunCurrentText = "Manual stream exposure";
+            obj.Ports.logMessage(sprintf( ...
+                'Manual stream exposure started: %d repeats.', repeatCount));
+            obj.Ports.syncAll();
+
+            try
+                [wasStopped, completedCount] = ...
+                    obj.Model.Services.laser.manualExposureSequence( ...
+                    obj.Model.State, obj.Model.Config, powerPercent, ...
+                    exposureSeconds, repeatCount, intervalSeconds, ...
+                    @obj.setLaserState, ...
+                    @(completed) obj.updateManualExposureProgress(completed, repeatCount), ...
+                    @obj.isStopRequested, @obj.yieldWithLivePosition);
+                obj.updateManualExposureProgress(completedCount, repeatCount);
+
+                if wasStopped || obj.Model.State.stopRequested
+                    obj.Ports.logMessage('Manual stream exposure stopped by user.');
+                else
+                    obj.Ports.logMessage('Manual stream exposure finished.');
+                end
+            catch ME
+                obj.finishManualBusy();
+                rethrow(ME);
+            end
+
+            obj.finishManualBusy();
+        end
+
+        function updateManualExposureProgress(obj, completedCount, repeatCount)
+            completedCount = max(0, min(round(double(completedCount)), repeatCount));
+            obj.Model.RunProgressText = sprintf('%d / %d', completedCount, repeatCount);
+            if completedCount == 0
+                obj.Model.RunCurrentText = "Manual stream exposure";
+            else
+                obj.Model.RunCurrentText = sprintf('Exposure %d', completedCount);
+            end
+            obj.Ports.syncRunStatus();
         end
 
         function finishManualBusy(obj)

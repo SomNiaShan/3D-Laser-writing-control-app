@@ -17,6 +17,12 @@ config.stage.pulseTriggerActiveHigh = false;
 % Zaber ASCII scheduled digital outputs use 0.1 ms units (firmware 7.37+).
 config.stage.digitalOutputScheduleMinUs = 100;
 config.stage.digitalOutputScheduleResolutionUs = 100;
+% Manual Exposure stores the complete repeat sequence in one device-side
+% stream. Zaber stream waits are integer milliseconds, so the requested
+% exposure-plus-interval cycle must land exactly on this grid.
+config.stage.manualExposureStreamId = 1;
+config.stage.manualExposureBufferId = 1;
+config.stage.streamWaitResolutionUs = 1000;
 
 config.daq = struct();
 config.daq.vendor = "ni";

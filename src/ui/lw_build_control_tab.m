@@ -438,5 +438,13 @@ controlUi.PreviewPowerField.Layout.Row = 4; controlUi.PreviewPowerField.Layout.C
 controlUi.FireExposureButton = uibutton(exposureGrid, 'Text', 'Fire Exposure', ...
     'ButtonPushedFcn', callbacks.fireExposure);
 controlUi.FireExposureButton.Layout.Row = 5;
-controlUi.FireExposureButton.Layout.Column = [1 2];
+controlUi.FireExposureButton.Layout.Column = 1;
+controlUi.FireExposureButton.Tooltip = ...
+    'Original host-sequenced repeats; useful for comparison and compatibility.';
+controlUi.FireStreamExposureButton = uibutton(exposureGrid, 'Text', 'Fire Stream', ...
+    'ButtonPushedFcn', callbacks.fireStreamExposure);
+controlUi.FireStreamExposureButton.Layout.Row = 5;
+controlUi.FireStreamExposureButton.Layout.Column = 2;
+controlUi.FireStreamExposureButton.Tooltip = ...
+    'Store the complete repeat sequence in the Zaber device before firing.';
 end
