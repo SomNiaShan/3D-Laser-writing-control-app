@@ -37,13 +37,53 @@ classdef TestPointModeTiming < matlab.unittest.TestCase
                 'lw:stage:PulseWidthBelowMinimum');
         end
 
-        function offGridWritingPlanDwellIsRejected(testCase)
-            path = writePlan(testCase, 150e-6, 0, "point");
+        function offGridWritingPlanDwellIsRoundedToNearestScheduleStep(testCase)
+            path = writePlan(testCase, 501187.234e-6, 0, "point");
             trajectory = lw_import_writing_plan_table(path);
+
+            [prepared, timing] = lw_prepare_point_run_trajectory( ...
+                trajectory, 100e-6, 0, lw_hardware_config());
+
+            testCase.verifyEqual(prepared.dwellSeconds, 0.5012, 'AbsTol', 1e-12);
+            testCase.verifyEqual(prepared.writingPlan.dwell, 0.5012, 'AbsTol', 1e-12);
+            testCase.verifyEqual(timing.dwellAutoRoundedPointCount, 1);
+            testCase.verifyEqual(timing.dwellAutoRoundMaxAdjustmentUs, 12.766, ...
+                'AbsTol', 1e-9);
+
+            preflight = struct( ...
+                'trajectory', prepared, ...
+                'pointTiming', timing, ...
+                'analysis', struct( ...
+                    'pointCount', 1, ...
+                    'xRange', [0, 0], ...
+                    'yDisplayRange', [0, 0], ...
+                    'zRange', [0, 0], ...
+                    'powerRange', [10, 10]));
+            summaryText = lw_build_run_preflight_summary_text( ...
+                preflight, "point", false, false, "Unavailable", "Disabled");
+            testCase.verifySubstring(summaryText, ...
+                'Dwell values auto-rounded: 1 (nearest 100.000 us');
+        end
+
+        function offGridNonPlanDwellRemainsStrict(testCase)
+            trajectory = lw_make_trajectory(0, 0, 0, 10, ...
+                "test", "point", struct('powerSource', "file"));
+            trajectory.dwellSeconds = 150e-6;
+            trajectory.preWritePauseSeconds = 0;
 
             testCase.verifyError(@() lw_prepare_point_run_trajectory( ...
                 trajectory, 100e-6, 0, lw_hardware_config()), ...
                 'lw:stage:PulseWidthResolution');
+        end
+
+        function scheduleMinimumSurvivesSecondsRoundTrip(testCase)
+            requestedUs = (100 .* 1e-6) .* 1e6;
+            testCase.verifyLessThan(requestedUs, 100);
+
+            actualUs = lw_validate_stage_schedule_duration_us( ...
+                requestedUs, lw_hardware_config(), 'Test exposure', false);
+
+            testCase.verifyEqual(actualUs, 100);
         end
 
         function scanOnlyPlanDoesNotClaimPointMode(testCase)

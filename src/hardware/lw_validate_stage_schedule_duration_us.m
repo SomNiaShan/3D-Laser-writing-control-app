@@ -31,7 +31,20 @@ end
 
 limits = lw_stage_digital_output_schedule_limits(config);
 positiveMask = valuesUs > 0;
-belowMinimum = positiveMask & valuesUs < limits.minimumUs;
+
+stepValues = valuesUs ./ limits.resolutionUs;
+roundedStepValues = round(stepValues);
+stepTolerance = 1e-9 .* max(1, abs(stepValues));
+onGrid = abs(stepValues - roundedStepValues) <= stepTolerance;
+
+% Unit conversions such as 100 us -> seconds -> us can produce a value just
+% below the exact schedule boundary. Snap only values already within the
+% schedule-grid tolerance before enforcing the hardware minimum.
+representableValuesUs = valuesUs;
+representableValuesUs(positiveMask & onGrid) = ...
+    roundedStepValues(positiveMask & onGrid) .* limits.resolutionUs;
+
+belowMinimum = positiveMask & representableValuesUs < limits.minimumUs;
 if any(belowMinimum(:))
     index = find(belowMinimum, 1, 'first');
     error('lw:stage:PulseWidthBelowMinimum', ...
@@ -40,9 +53,7 @@ if any(belowMinimum(:))
         label, localIndexText(valuesUs, index), valuesUs(index), limits.minimumUs);
 end
 
-stepValues = valuesUs ./ limits.resolutionUs;
-stepTolerance = 1e-9 .* max(1, abs(stepValues));
-offGrid = positiveMask & abs(stepValues - round(stepValues)) > stepTolerance;
+offGrid = positiveMask & ~onGrid;
 if any(offGrid(:))
     index = find(offGrid, 1, 'first');
     error('lw:stage:PulseWidthResolution', ...
@@ -51,7 +62,7 @@ if any(offGrid(:))
         label, localIndexText(valuesUs, index), valuesUs(index), limits.resolutionUs);
 end
 
-valuesUs(positiveMask) = round(stepValues(positiveMask)) .* limits.resolutionUs;
+valuesUs = representableValuesUs;
 end
 
 function textValue = localIndexText(values, index)
