@@ -397,10 +397,18 @@ classdef StageLaserController < handle
 
         function laserOnImpl(obj)
             obj.requireLaserReady();
-            powerPercent = obj.Model.Ui.LaserPowerField.Value;
-            obj.Model.Services.laser.setPower(obj.Model.State, powerPercent);
             obj.Model.Services.stage.setPulseTrigger(obj.Model.State, true, obj.Model.Config);
             obj.setLaserState(true);
+        end
+
+        function onApplyManualPower(obj, ~, ~)
+            obj.Ports.runUiAction(@() obj.applyManualPowerImpl(), 'Failed to apply manual laser power');
+        end
+
+        function applyManualPowerImpl(obj)
+            obj.requireLaserReady();
+            powerPercent = obj.Model.Ui.LaserPowerField.Value;
+            obj.Model.Services.laser.setPower(obj.Model.State, powerPercent);
         end
 
         function onLaserOff(obj, ~, ~)
@@ -408,7 +416,9 @@ classdef StageLaserController < handle
         end
 
         function laserOffImpl(obj)
-            obj.forceLaserSafeOff();
+            obj.requireLaserReady();
+            obj.Model.Services.stage.setPulseTrigger(obj.Model.State, false, obj.Model.Config);
+            obj.setLaserState(false);
         end
 
         function onFireExposure(obj, ~, ~)

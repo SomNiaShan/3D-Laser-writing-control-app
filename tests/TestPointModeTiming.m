@@ -102,6 +102,7 @@ classdef TestPointModeTiming < matlab.unittest.TestCase
             lw_ensure_zaber_motion_library();
             config = lw_hardware_config();
 
+            config.stage.pulseTriggerActiveHigh = true;
             activeAction = lw_stage_pulse_trigger_action(true, config);
             safeAction = lw_stage_pulse_trigger_action(false, config);
             testCase.verifyEqual(string(activeAction.toString()), "ON");
