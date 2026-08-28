@@ -11,9 +11,9 @@ config.stage.deviceOrder = struct('x', 1, 'y', 3, 'z', 2);
 config.stage.axisMap = struct('x', 1, 'y', 1, 'z', 1);
 config.stage.pulseTriggerAxis = 'x';
 config.stage.pulseTriggerChannel = 1;
-% CARBIDE PP_EN is configured active-high in this setup. Keep this explicit:
+% CARBIDE PP_EN is configured active-low in this setup. Keep this explicit:
 % the inactive level is a safety-critical hardware state.
-config.stage.pulseTriggerActiveHigh = true;
+config.stage.pulseTriggerActiveHigh = false;
 % Zaber ASCII scheduled digital outputs use 0.1 ms units (firmware 7.37+).
 config.stage.digitalOutputScheduleMinUs = 100;
 config.stage.digitalOutputScheduleResolutionUs = 100;
