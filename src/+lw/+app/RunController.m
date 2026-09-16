@@ -464,6 +464,8 @@ classdef RunController < handle
                     obj.Model.RunCurrentText = sprintf('Reconnecting stages %d/%d', attempt, maxConnectAttempts);
                     obj.Ports.syncAll();
                     obj.Model.State = obj.Model.Services.stage.connect(obj.Model.State, obj.Model.Config);
+                    obj.Model.Services.stage.setPulseTrigger(obj.Model.State, false, obj.Model.Config);
+                    obj.Ports.stageLaser.setLaserState(false);
                     obj.Ports.stageLaser.startPositionTimer();
                     connected = true;
                     obj.Ports.logMessage(sprintf('Stages reconnected on %s.', obj.Model.Config.stage.comPort));

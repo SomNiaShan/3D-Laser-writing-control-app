@@ -96,6 +96,31 @@ A zero point dwell is retained as an explicit no-exposure point. The trigger
 polarity is safety-critical and is set explicitly by
 `config.stage.pulseTriggerActiveHigh`.
 
+## Laser gate polarity
+
+The default is now `config.stage.pulseTriggerActiveHigh = true`: the X-stage
+digital output 1 is HIGH to enable PP_EN and LOW to disable it. Manual On/Off,
+Point, Path (including imported scans), Z Sweep, both Manual Exposure modes,
+STOP, and shutdown use the same polarity mapping. Stage connection and
+recovery explicitly write the inactive level before reporting success.
+
+Before using this version, inhibit optical output with the independent
+shutter/interlock, close the previous app, and set CARBIDE User App -> External
+Control -> Trigger external -> Active high. Restart this app to load the new
+configuration, then verify the electrical gate with optical output inhibited.
+An already-open app retains its old configuration. Old saved plans retain
+their logical on/off states and do not need their laser_state values inverted.
+
+CARBIDE PP_EN has an internal pull-up. An open/disconnected input can therefore
+enable the pulse picker in Active high mode if the other laser conditions
+permit emission. Software cannot guarantee LOW during power-up, cable loss,
+communication failure, or a host crash. Keep an independent shutter/interlock;
+do not use PP_EN as the sole safety barrier. A polarity mismatch reverses the
+meaning of the software's On and Off commands. This change has not established
+or corrected the cause of the reported 62.5 ms scan gap.
+
+See the supervised polarity transition checks in [HARDWARE_ACCEPTANCE.md](HARDWARE_ACCEPTANCE.md).
+
 ## Manual Exposure timing semantics
 
 The Control tab intentionally provides two implementations using the same

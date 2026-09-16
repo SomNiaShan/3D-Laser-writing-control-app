@@ -25,6 +25,10 @@ classdef StageLaserController < handle
 
         function connectStagesImpl(obj)
             obj.Model.State = obj.Model.Services.stage.connect(obj.Model.State, obj.Model.Config);
+            % Establish the configured inactive level before reporting ready.
+            % Let a failed write abort connection setup instead of hiding it.
+            obj.Model.Services.stage.setPulseTrigger(obj.Model.State, false, obj.Model.Config);
+            obj.setLaserState(false);
             obj.Ports.logMessage(sprintf('Stages connected on %s.', obj.Model.Config.stage.comPort));
             obj.tryRefreshPosition(false);
             obj.startPositionTimer();

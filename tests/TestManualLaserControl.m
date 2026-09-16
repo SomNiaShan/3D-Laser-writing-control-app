@@ -11,6 +11,53 @@ classdef TestManualLaserControl < matlab.unittest.TestCase
     end
 
     methods (Test)
+        function connectionInitializesInactiveGate(testCase)
+            [fig, controller, calls] = makeController();
+            cleanup = onCleanup(@() deleteIfValid(fig));
+            timerCleanup = onCleanup(@() controller.StageLaser.stopPositionTimer());
+            controller.Model.Services.stage.connect = ...
+                @(state, ~) recordConnection(calls, state);
+            controller.Model.State.currentPosition = struct('x', 1, 'y', 2, 'z', 3);
+            controller.Model.State.laserIsOn = true;
+
+            controller.StageLaser.connectStagesImpl();
+
+            testCase.verifyEqual(calls.Value, ["connect", "trigger:false"]);
+            testCase.verifyFalse(controller.Model.State.laserIsOn);
+        end
+
+        function connectionFailsIfInactiveGateCannotBeWritten(testCase)
+            [fig, controller, calls] = makeController();
+            cleanup = onCleanup(@() deleteIfValid(fig));
+            controller.Model.Services.stage.connect = ...
+                @(state, ~) recordConnection(calls, state);
+            controller.Model.Services.stage.setPulseTrigger = ...
+                @(~, ~, ~) error('Test:GateWriteFailure', 'Injected gate write failure.');
+            controller.Model.State.laserIsOn = true;
+
+            testCase.verifyError(@() controller.StageLaser.connectStagesImpl(), ...
+                'Test:GateWriteFailure');
+
+            testCase.verifyEqual(calls.Value, "connect");
+            testCase.verifyTrue(controller.Model.State.laserIsOn);
+            testCase.verifyEmpty(controller.Model.Ui.PositionTimerHandle);
+        end
+
+        function recoveryConnectionInitializesInactiveGate(testCase)
+            [fig, controller, calls] = makeController();
+            cleanup = onCleanup(@() deleteIfValid(fig));
+            timerCleanup = onCleanup(@() controller.StageLaser.stopPositionTimer());
+            controller.Model.Services.stage.connect = ...
+                @(state, ~) recordConnection(calls, state);
+            controller.Model.State.laserIsOn = true;
+
+            connected = controller.Run.reconnectStagesForRecovery();
+
+            testCase.verifyTrue(connected);
+            testCase.verifyEqual(calls.Value, ["connect", "trigger:false"]);
+            testCase.verifyFalse(controller.Model.State.laserIsOn);
+        end
+
         function manualOnOffOnlyChangePulseTrigger(testCase)
             [fig, controller, calls] = makeController();
             cleanup = onCleanup(@() deleteIfValid(fig));
@@ -101,6 +148,10 @@ end
 
 function recordTrigger(calls, active)
 calls.Value(end + 1) = "trigger:" + string(logical(active));
+end
+
+function state = recordConnection(calls, state)
+calls.Value(end + 1) = "connect";
 end
 
 function recordValue(calls, name, value)

@@ -142,7 +142,7 @@ classdef TestPointModeTiming < matlab.unittest.TestCase
             lw_ensure_zaber_motion_library();
             config = lw_hardware_config();
 
-            config.stage.pulseTriggerActiveHigh = true;
+            testCase.verifyTrue(config.stage.pulseTriggerActiveHigh);
             activeAction = lw_stage_pulse_trigger_action(true, config);
             safeAction = lw_stage_pulse_trigger_action(false, config);
             testCase.verifyEqual(string(activeAction.toString()), "ON");
@@ -154,7 +154,48 @@ classdef TestPointModeTiming < matlab.unittest.TestCase
             testCase.verifyEqual(string(activeAction.toString()), "OFF");
             testCase.verifyEqual(string(safeAction.toString()), "ON");
         end
+
+        function defaultDirectAndScheduledGatesAreActiveHigh(testCase)
+            lw_ensure_zaber_motion_library();
+            config = lw_hardware_config();
+            device = FakePulseTriggerDevice();
+            state = struct('axes', struct('x', device));
+
+            lw_set_stage_pulse_trigger(state, true, config);
+            lw_set_stage_pulse_trigger(state, false, config);
+            lw_schedule_stage_pulse_trigger(state, 100e-6, config);
+
+            testCase.verifyEqual(device.GateActions, ["ON", "OFF"]);
+            testCase.verifyEqual(device.GateChannels, [1, 1]);
+            schedule = device.Schedules{1};
+            testCase.verifyEqual(schedule.channel, 1);
+            testCase.verifyEqual(schedule.active, "ON");
+            testCase.verifyEqual(schedule.inactive, "OFF");
+            testCase.verifyEqual(schedule.duration, 100);
+            testCase.verifyEqual(schedule.unit, ...
+                string(zaber.motion.Units.TIME_MICROSECONDS.toString()));
+        end
+
+        function exposureErrorForcesElectricalLow(testCase)
+            lw_ensure_zaber_motion_library();
+            device = FakePulseTriggerDevice();
+            state = struct('axes', struct('x', device), 'daq', device);
+
+            testCase.verifyError(@() lw_manual_exposure( ...
+                state, lw_hardware_config(), 15, 0.25, @failWhenActive), ...
+                'Test:ExposureCallbackFailure');
+
+            testCase.verifyEqual(device.Schedules{1}.active, "ON");
+            testCase.verifyEqual(device.Schedules{1}.inactive, "OFF");
+            testCase.verifyEqual(device.GateActions, "OFF");
+        end
     end
+end
+
+function failWhenActive(active)
+if active
+    error('Test:ExposureCallbackFailure', 'Injected failure after gate activation.');
+end
 end
 
 function path = writePlan(testCase, dwellSeconds, pauseSeconds, modes)

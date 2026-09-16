@@ -6,6 +6,24 @@ before enabling any output.
 
 ## Setup
 
+- Polarity transition: inhibit optical output with the independent shutter or
+  interlock before closing an old app or changing either side's polarity.
+  This app now defaults to HIGH = PP_EN enabled, LOW = PP_EN disabled;
+  CARBIDE External Control must use Trigger external -> Active high. Restart
+  the app after changing the configuration. Do not run an old active-low app
+  against the new laser setting.
+- With optical output inhibited, verify X-stage digital output 1 is LOW after
+  connection/reconnection, idle Off, STOP, normal finish, and app close. Verify
+  HIGH only for requested exposure windows in Manual On/Off, Point, Path,
+  Z Sweep, Fire Exposure, and Fire Stream. Check scheduled falling edges as
+  well as the opening rising edge.
+- CARBIDE PP_EN has an internal pull-up: an open signal cable can request
+  emission in Active high mode. Verify independent shutter/interlock behavior
+  for power-up and loss of signal/control with optical output inhibited. A
+  successful software OFF test does not establish safety under these failures.
+- Reference: CARBIDE-CB3-40W-CBM03-2H-3H User Manual, sections 5.8.1 and 6.3
+  (pages 72 and 95), and the [Zaber X-LDA-AE I/O manual](https://www.zaber.com/manuals/X-LDA-AE#Digital_Outputs).
+
 - Record MATLAB version, Git commit, Windows build, device serial numbers, and
   operator name.
 - Start the original app once and record expected connection/status text.
