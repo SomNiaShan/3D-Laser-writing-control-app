@@ -1,3 +1,4 @@
+%% 
 function fig = laser_writing_app_refactored(serviceOverrides)
 %LASER_WRITING_APP_REFACTORED Start the isolated refactored application.
 

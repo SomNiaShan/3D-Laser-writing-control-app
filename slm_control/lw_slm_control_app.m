@@ -678,6 +678,9 @@ logMessage('App opened.');
     end
 
     function onToggleConnection(~, ~)
+        if ~strcmp(connectButton.Enable, 'on')
+            return;
+        end
         if isempty(state.ctx)
             onConnect([], []);
         else
@@ -686,18 +689,44 @@ logMessage('App opened.');
     end
 
     function onConnect(~, ~)
+        if ~strcmp(connectButton.Enable, 'on')
+            return;
+        end
+        connectButton.Enable = 'off';
+        connectionCleanup = onCleanup(@() restoreConnectButton(connectButton));
         try
             if isempty(state.ctx)
+                logMessage('Connecting SLM...');
+                if ~isvalid(fig)
+                    return;
+                end
                 state.ctx = slm_init(state.cfg);
+                if ~isvalid(fig)
+                    slm_close(state.ctx);
+                    state.ctx = [];
+                    return;
+                end
                 logMessage(sprintf('Connected SLM: %d x %d px, wavelength %.1f nm.', ...
                     state.ctx.widthPx, state.ctx.heightPx, state.ctx.config.wavelengthNm));
+                if ~isvalid(fig)
+                    return;
+                end
+                if isfield(state.ctx, 'previewWarning') && ~isempty(state.ctx.previewWarning)
+                    logMessage(['WARNING: ', state.ctx.previewWarning]);
+                end
             else
                 logMessage('SLM is already connected.');
             end
-            updateConnectionStatus();
-            publishCurrentDrillOptions();
+            if isvalid(fig)
+                updateConnectionStatus();
+                publishCurrentDrillOptions();
+            end
         catch err
-            showError(err);
+            if isvalid(fig)
+                showError(err);
+            else
+                fprintf(2, '%s\n', getReport(err, 'extended', 'hyperlinks', 'off'));
+            end
         end
     end
 
@@ -1514,6 +1543,7 @@ logMessage('App opened.');
 
     function showError(err)
         logMessage(sprintf('ERROR: %s', err.message));
+        fprintf(2, '%s\n', getReport(err, 'extended', 'hyperlinks', 'off'));
         uialert(fig, err.message, 'SLM Control Error');
     end
 
@@ -1537,6 +1567,12 @@ logMessage('App opened.');
         end
         delete(fig);
     end
+end
+
+function restoreConnectButton(button)
+if isvalid(button)
+    button.Enable = 'on';
+end
 end
 
 function localAddRepoPaths()
