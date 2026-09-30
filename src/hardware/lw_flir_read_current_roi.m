@@ -18,10 +18,10 @@ if ~isfinite(width) || ~isfinite(height)
     error('Camera Width/Height values are not readable.');
 end
 
-sensorWidth = localReadIntegerLimit(widthNode, 'Max', width);
-sensorHeight = localReadIntegerLimit(heightNode, 'Max', height);
 offsetX = localReadOptionalIntegerNode(nodeMap, 'OffsetX', 0);
 offsetY = localReadOptionalIntegerNode(nodeMap, 'OffsetY', 0);
+sensorWidth = localReadSensorExtent(nodeMap, 'WidthMax', widthNode, width + offsetX);
+sensorHeight = localReadSensorExtent(nodeMap, 'HeightMax', heightNode, height + offsetY);
 
 roi = struct( ...
     'Name', string(regionName), ...
@@ -31,6 +31,15 @@ roi = struct( ...
     'Height', height, ...
     'SensorWidth', sensorWidth, ...
     'SensorHeight', sensorHeight);
+end
+
+function value = localReadSensorExtent(nodeMap, maxNodeName, sizeNode, usedExtent)
+% WidthMax/HeightMax report the full range; Width.Max shrinks as OffsetX grows.
+value = localReadOptionalIntegerNode(nodeMap, maxNodeName, NaN);
+if isfinite(value) && value >= usedExtent
+    return;
+end
+value = localReadIntegerLimit(sizeNode, 'Max', usedExtent);
 end
 
 function value = localReadOptionalIntegerNode(nodeMap, baseName, fallback)

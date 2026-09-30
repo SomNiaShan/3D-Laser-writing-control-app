@@ -63,6 +63,15 @@ before enabling any output.
   close output, standby, timer restart, disconnect, and reconnect.
 - FLIR: enumerate, connect, exposure/gain, test capture, live start/stop,
   timeout handling, ROI, auto exposure, and disconnect during idle only.
+- FLIR ROI: apply a Custom ROI that SpinView also accepts (for example
+  500 x 500 at 1996, 686) and confirm Test Capture returns that size and the
+  same scene region. Apply Full sensor, Top-left quarter, and Custom while Live
+  FLIR runs; live must resume each time. In Live FLIR, Draw ROI on a full frame,
+  move and resize the rectangle, Apply ROI, and confirm the new live frame shows
+  the boxed region. Press Esc while drawing and Cancel after drawing; the
+  applied ROI must not change. Restart the app and confirm the last applied ROI
+  is restored, then run a short 3D stack and check the preflight ROI line and
+  the `OffsetX`/`OffsetY` columns in `metadata.csv`.
 - Mako: connect, monitor/alignment view, disconnect, reconnect, and app close.
 - SLM: open independent control, connect batch SLM, show selected pattern,
   disconnect, and app close.

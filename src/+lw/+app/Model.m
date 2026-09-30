@@ -24,6 +24,8 @@ classdef Model < handle
         CurrentSourceMode = "Imported Points"
         PausedManualMotionActive = false
         ImagingRunActive = false
+        FlirRoiSelection = struct()
+        FlirRoiLimits = struct()
         LastPositionRefreshTic
         RunLog
         MakoController = []
@@ -85,6 +87,15 @@ classdef Model < handle
             ui.FlirLiveTimeoutField = [];
             ui.FlirLivePeriodField = [];
             ui.FlirLiveMarkerCheckBox = [];
+            ui.FlirLiveRoiLabel = [];
+            ui.FlirLiveDrawRoiButton = [];
+            ui.FlirLiveFullFrameButton = [];
+            ui.FlirLiveApplyRoiButton = [];
+            ui.FlirLiveCancelRoiButton = [];
+            ui.FlirRoiDrawRect = [];
+            ui.FlirRoiEditActive = false;
+            ui.FlirRoiEditResumeLive = false;
+            ui.FlirRoiEditBase = struct('OffsetX', 0, 'OffsetY', 0);
             ui.ImagingAutoExposureCheckBox = [];
             ui.ImagingAutoExposureSamplesField = [];
             ui.ImagingAutoExposureSafetyFactorField = [];

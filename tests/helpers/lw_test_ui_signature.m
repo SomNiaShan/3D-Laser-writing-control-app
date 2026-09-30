@@ -117,6 +117,10 @@ if isMakoDiscoveryProperty(object, propertyName)
     text = outputName + "=<mako-discovery-state>";
     return;
 end
+if isAxesRenderVisibility(object, propertyName)
+    text = outputName + "=<axes-render-state>";
+    return;
+end
 
 try
     value = object.(propertyName);
@@ -149,6 +153,21 @@ dynamicStatusText = [ ...
     "Disconnected", "GenTL adaptor not available", ...
     "No camera detected", "Camera detected"];
 tf = isscalar(value) && any(value == dynamicStatusText);
+end
+
+function tf = isAxesRenderVisibility(object, propertyName)
+% UIAxes and their title text report different Visible values across
+% otherwise identical launches; the app never sets them, so ignore them.
+tf = false;
+if ~strcmp(propertyName, 'Visible')
+    return;
+end
+if isa(object, 'matlab.ui.control.UIAxes')
+    tf = true;
+    return;
+end
+tf = isa(object, 'matlab.graphics.primitive.Text') && ~isempty(object.Parent) && ...
+    isa(object.Parent, 'matlab.ui.control.UIAxes');
 end
 
 function tf = isMakoDescendant(object)

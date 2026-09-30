@@ -25,9 +25,9 @@ helpers.createGridSplitter(controlsGrid, 1, 2, 'column', 1, 3);
 cameraPanel = uipanel(controlsGrid, 'Title', 'FLIR Camera');
 cameraPanel.Layout.Row = 1;
 cameraPanel.Layout.Column = 1;
-cameraGrid = uigridlayout(cameraPanel, [14, 2], ...
+cameraGrid = uigridlayout(cameraPanel, [15, 2], ...
     'ColumnWidth', {120, '1x'}, ...
-    'RowHeight', repmat({'fit'}, 1, 14), ...
+    'RowHeight', repmat({'fit'}, 1, 15), ...
     'Padding', [12, 12, 12, 12], ...
     'RowSpacing', 8);
 helpers.enableScrolling(cameraGrid);
@@ -78,47 +78,79 @@ imagingUi.FlirApplyGainButton = uibutton(cameraGrid, 'Text', 'Apply Gain', ...
 imagingUi.FlirApplyGainButton.Layout.Row = 8;
 imagingUi.FlirApplyGainButton.Layout.Column = [1 2];
 
+helpers.createRightLabel(cameraGrid, 'ROI', 9, 1);
+imagingUi.FlirRoiModeDropDown = uidropdown(cameraGrid, ...
+    'Items', {'Custom', 'Full sensor', 'Top-left quarter'}, ...
+    'Value', 'Full sensor', ...
+    'ValueChangedFcn', callbacks.flirRoiInputChanged);
+imagingUi.FlirRoiModeDropDown.Layout.Row = 9;
+imagingUi.FlirRoiModeDropDown.Layout.Column = 2;
+imagingUi.FlirRoiModeDropDown.Tooltip = ...
+    'Sensor area used by test capture, live view, and 3D imaging.';
+
+roiFieldGrid = uigridlayout(cameraGrid, [2, 4], ...
+    'ColumnWidth', {'fit', '1x', 'fit', '1x'}, ...
+    'RowHeight', {'fit', 'fit'}, ...
+    'Padding', [0, 0, 0, 0], ...
+    'RowSpacing', 8, ...
+    'ColumnSpacing', 6);
+roiFieldGrid.Layout.Row = 10;
+roiFieldGrid.Layout.Column = [1 2];
+roiFieldTooltip = 'Full-sensor pixels; snapped to the camera step size on Apply ROI.';
+helpers.createRightLabel(roiFieldGrid, 'Offset X', 1, 1);
+imagingUi.FlirRoiOffsetXField = createRoiField(roiFieldGrid, 1, 2, 0, roiFieldTooltip, callbacks.flirRoiInputChanged);
+helpers.createRightLabel(roiFieldGrid, 'Offset Y', 1, 3);
+imagingUi.FlirRoiOffsetYField = createRoiField(roiFieldGrid, 1, 4, 0, roiFieldTooltip, callbacks.flirRoiInputChanged);
+helpers.createRightLabel(roiFieldGrid, 'Width', 2, 1);
+imagingUi.FlirRoiWidthField = createRoiField(roiFieldGrid, 2, 2, 1, roiFieldTooltip, callbacks.flirRoiInputChanged);
+helpers.createRightLabel(roiFieldGrid, 'Height', 2, 3);
+imagingUi.FlirRoiHeightField = createRoiField(roiFieldGrid, 2, 4, 1, roiFieldTooltip, callbacks.flirRoiInputChanged);
+
+roiButtonGrid = uigridlayout(cameraGrid, [1, 2], ...
+    'ColumnWidth', {'1x', '1x'}, ...
+    'RowHeight', {'fit'}, ...
+    'Padding', [0, 0, 0, 0], ...
+    'ColumnSpacing', 8);
+roiButtonGrid.Layout.Row = 11;
+roiButtonGrid.Layout.Column = [1 2];
+imagingUi.FlirCenterRoiButton = uibutton(roiButtonGrid, 'Text', 'Center ROI', ...
+    'Tooltip', 'Center the ROI on the sensor, keeping its width and height.', ...
+    'ButtonPushedFcn', callbacks.centerFlirRoi);
+imagingUi.FlirCenterRoiButton.Layout.Row = 1;
+imagingUi.FlirCenterRoiButton.Layout.Column = 1;
+imagingUi.FlirApplyRoiButton = uibutton(roiButtonGrid, 'Text', 'Apply ROI', ...
+    'Tooltip', 'Write the ROI to the camera and remember it for the next app start.', ...
+    'ButtonPushedFcn', callbacks.applyFlirRoi);
+imagingUi.FlirApplyRoiButton.Layout.Row = 1;
+imagingUi.FlirApplyRoiButton.Layout.Column = 2;
+
+imagingUi.FlirRoiInfoLabel = uilabel(cameraGrid, ...
+    'Text', 'Connect FLIR to read the sensor size.', ...
+    'WordWrap', 'on');
+imagingUi.FlirRoiInfoLabel.Layout.Row = 12;
+imagingUi.FlirRoiInfoLabel.Layout.Column = [1 2];
+
 imagingUi.FlirTestCaptureButton = uibutton(cameraGrid, 'Text', 'Test Capture', ...
     'ButtonPushedFcn', callbacks.testFlirCapture);
-imagingUi.FlirTestCaptureButton.Layout.Row = 9;
+imagingUi.FlirTestCaptureButton.Layout.Row = 13;
 imagingUi.FlirTestCaptureButton.Layout.Column = [1 2];
 
 imagingUi.OpenFlirLiveWindowButton = uibutton(cameraGrid, 'Text', 'Live FLIR...', ...
     'ButtonPushedFcn', callbacks.openFlirLiveWindow);
-imagingUi.OpenFlirLiveWindowButton.Layout.Row = 10;
+imagingUi.OpenFlirLiveWindowButton.Layout.Row = 14;
 imagingUi.OpenFlirLiveWindowButton.Layout.Column = [1 2];
-
-imagingUi.ImagingAutoExposureCheckBox = uicheckbox(cameraGrid, ...
-    'Text', 'Auto exposure scout', ...
-    'ValueChangedFcn', callbacks.autoExposureChanged);
-imagingUi.ImagingAutoExposureCheckBox.Layout.Row = 11;
-imagingUi.ImagingAutoExposureCheckBox.Layout.Column = [1 2];
-imagingUi.ImagingAutoExposureCheckBox.Tooltip = ...
-    'Sample evenly spaced Z planes and set the stack exposure from the no-clip estimate.';
-
-helpers.createRightLabel(cameraGrid, 'Scout Z Samples', 12, 1);
-imagingUi.ImagingAutoExposureSamplesField = uieditfield(cameraGrid, 'numeric');
-imagingUi.ImagingAutoExposureSamplesField.Layout.Row = 12;
-imagingUi.ImagingAutoExposureSamplesField.Layout.Column = 2;
-
-helpers.createRightLabel(cameraGrid, 'Safety Factor', 13, 1);
-imagingUi.ImagingAutoExposureSafetyFactorField = uieditfield(cameraGrid, 'numeric');
-imagingUi.ImagingAutoExposureSafetyFactorField.Layout.Row = 13;
-imagingUi.ImagingAutoExposureSafetyFactorField.Layout.Column = 2;
-imagingUi.ImagingAutoExposureSafetyFactorField.Tooltip = ...
-    'Multiplier for the estimated no-clip exposure; use a value between 0 and 1.';
 
 cameraNoteLabel = uilabel(cameraGrid, ...
     'Text', 'Close SpinView before connecting; the FLIR camera is used exclusively here.');
-cameraNoteLabel.Layout.Row = 14;
+cameraNoteLabel.Layout.Row = 15;
 cameraNoteLabel.Layout.Column = [1 2];
 
 scanPanel = uipanel(controlsGrid, 'Title', 'Z Stack');
 scanPanel.Layout.Row = 1;
 scanPanel.Layout.Column = 3;
-scanGrid = uigridlayout(scanPanel, [14, 2], ...
+scanGrid = uigridlayout(scanPanel, [17, 2], ...
     'ColumnWidth', {120, '1x'}, ...
-    'RowHeight', repmat({'fit'}, 1, 14), ...
+    'RowHeight', repmat({'fit'}, 1, 17), ...
     'Padding', [12, 12, 12, 12], ...
     'RowSpacing', 8);
 helpers.enableScrolling(scanGrid);
@@ -154,19 +186,44 @@ helpers.createRightLabel(scanGrid, 'Timeout (ms)', 7, 1);
 imagingUi.ImagingTimeoutField = uieditfield(scanGrid, 'numeric');
 imagingUi.ImagingTimeoutField.Layout.Row = 7;
 imagingUi.ImagingTimeoutField.Layout.Column = 2;
-helpers.createRightLabel(scanGrid, 'Prefix', 8, 1);
+
+imagingUi.ImagingAutoExposureCheckBox = uicheckbox(scanGrid, ...
+    'Text', 'Auto exposure scout', ...
+    'ValueChangedFcn', callbacks.autoExposureChanged);
+imagingUi.ImagingAutoExposureCheckBox.Layout.Row = 8;
+imagingUi.ImagingAutoExposureCheckBox.Layout.Column = [1 2];
+imagingUi.ImagingAutoExposureCheckBox.Tooltip = ...
+    'Before the stack, sample evenly spaced Z planes and set one exposure for the whole stack.';
+
+helpers.createRightLabel(scanGrid, 'Scout Z Samples', 9, 1);
+imagingUi.ImagingAutoExposureSamplesField = uieditfield(scanGrid, 'numeric');
+imagingUi.ImagingAutoExposureSamplesField.Layout.Row = 9;
+imagingUi.ImagingAutoExposureSamplesField.Layout.Column = 2;
+
+helpers.createRightLabel(scanGrid, 'Safety Factor', 10, 1);
+imagingUi.ImagingAutoExposureSafetyFactorField = uieditfield(scanGrid, 'numeric', ...
+    'Limits', [0, Inf], ...
+    'LowerLimitInclusive', 'off', ...
+    'ValueChangedFcn', callbacks.autoExposureSafetyFactorChanged);
+imagingUi.ImagingAutoExposureSafetyFactorField.Layout.Row = 10;
+imagingUi.ImagingAutoExposureSafetyFactorField.Layout.Column = 2;
+imagingUi.ImagingAutoExposureSafetyFactorField.Tooltip = ...
+    ['Multiplier for the estimated no-clip exposure. 1 puts the brightest sampled pixel ', ...
+    'at full scale; above 1 it saturates.'];
+
+helpers.createRightLabel(scanGrid, 'Prefix', 11, 1);
 imagingUi.ImagingPrefixField = uieditfield(scanGrid, 'text');
-imagingUi.ImagingPrefixField.Layout.Row = 8;
+imagingUi.ImagingPrefixField.Layout.Row = 11;
 imagingUi.ImagingPrefixField.Layout.Column = 2;
 
-helpers.createRightLabel(scanGrid, 'Folder', 9, 1);
+helpers.createRightLabel(scanGrid, 'Folder', 12, 1);
 imagingUi.ImagingFolderField = uieditfield(scanGrid, 'text');
-imagingUi.ImagingFolderField.Layout.Row = 9;
+imagingUi.ImagingFolderField.Layout.Row = 12;
 imagingUi.ImagingFolderField.Layout.Column = 2;
 
 imagingUi.ImagingBrowseFolderButton = uibutton(scanGrid, 'Text', 'Browse Folder', ...
     'ButtonPushedFcn', callbacks.browseImagingFolder);
-imagingUi.ImagingBrowseFolderButton.Layout.Row = 10;
+imagingUi.ImagingBrowseFolderButton.Layout.Row = 13;
 imagingUi.ImagingBrowseFolderButton.Layout.Column = [1 2];
 
 imagingEndpointGrid = uigridlayout(scanGrid, [1, 2], ...
@@ -174,7 +231,7 @@ imagingEndpointGrid = uigridlayout(scanGrid, [1, 2], ...
     'RowHeight', {'fit'}, ...
     'Padding', [0, 0, 0, 0], ...
     'ColumnSpacing', 8);
-imagingEndpointGrid.Layout.Row = 11;
+imagingEndpointGrid.Layout.Row = 14;
 imagingEndpointGrid.Layout.Column = [1 2];
 imagingUi.ImagingSetEndButton = uibutton(imagingEndpointGrid, 'Text', 'Set as End', ...
     'ButtonPushedFcn', callbacks.setCurrentImagingEnd);
@@ -188,18 +245,18 @@ imagingUi.ImagingSetStartButton.Layout.Column = 2;
 imagingUi.Start3DImagingButton = uibutton(scanGrid, 'Text', 'Start 3D Imaging', ...
     'FontWeight', 'bold', ...
     'ButtonPushedFcn', callbacks.start3DImaging);
-imagingUi.Start3DImagingButton.Layout.Row = 12;
+imagingUi.Start3DImagingButton.Layout.Row = 15;
 imagingUi.Start3DImagingButton.Layout.Column = [1 2];
 
 imagingUi.Stop3DImagingButton = uibutton(scanGrid, 'Text', 'STOP Imaging', ...
     'FontWeight', 'bold', ...
     'ButtonPushedFcn', callbacks.stopRequested);
-imagingUi.Stop3DImagingButton.Layout.Row = 13;
+imagingUi.Stop3DImagingButton.Layout.Row = 16;
 imagingUi.Stop3DImagingButton.Layout.Column = [1 2];
 
 stackNoteLabel = uilabel(scanGrid, ...
     'Text', 'Images are saved as a multi-page TIFF stack with a metadata.csv file in a timestamped run folder.');
-stackNoteLabel.Layout.Row = 14;
+stackNoteLabel.Layout.Row = 17;
 stackNoteLabel.Layout.Column = [1 2];
 
 statusPanel = uipanel(grid, 'Title', 'Imaging Status');
@@ -240,4 +297,16 @@ imagingUi.ImagingAxes.Layout.Column = 1;
 title(imagingUi.ImagingAxes, 'No frame captured');
 imagingUi.ImagingAxes.XTick = [];
 imagingUi.ImagingAxes.YTick = [];
+end
+
+function field = createRoiField(parent, row, column, minValue, tooltip, valueChangedFcn)
+field = uieditfield(parent, 'numeric', ...
+    'Limits', [minValue, Inf], ...
+    'RoundFractionalValues', 'on', ...
+    'ValueDisplayFormat', '%.0f', ...
+    'Value', minValue, ...
+    'Tooltip', tooltip, ...
+    'ValueChangedFcn', valueChangedFcn);
+field.Layout.Row = row;
+field.Layout.Column = column;
 end

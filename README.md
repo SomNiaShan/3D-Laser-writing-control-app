@@ -43,10 +43,12 @@ Run lifecycle stress and the locked screenshot comparison with:
 report = run_refactor_checks(IncludeStress=true, IncludeScreenshots=true);
 ```
 
-The locked GUI contract is 516 objects. Its normalized signature is recorded
+The locked GUI contract is 531 objects. Its normalized signature is recorded
 in `tests/TestLaserWritingAppBaseline.m`.
 Mako device-discovery availability is normalized because it is runtime
-hardware state rather than a static GUI property.
+hardware state rather than a static GUI property. The `Visible` value of
+UIAxes and their title text is normalized too: the app never sets it, and it
+differs between otherwise identical launches.
 
 ## Plan-driven execution
 
@@ -141,6 +143,23 @@ Values that cannot be represented exactly are rejected rather than rounded.
 Buffer setup adds a variable button-to-first-light delay, but does not change
 the stored ON/OFF timeline. The pulse-trigger stage must be homed and idle
 before stream playback.
+
+## FLIR capture region (ROI)
+
+The FLIR Camera panel chooses the sensor area used by Test Capture, Live FLIR,
+single 3D stacks, and batch imaging: Custom, Full sensor, or Top-left quarter.
+Custom offsets and sizes are full-sensor pixels, the same values SpinView shows
+under Image Format. The camera crops in hardware, so frames, TIFF stacks, and
+auto-exposure scouting only contain the ROI; `metadata.csv` records the offset
+and sensor size for each frame.
+
+`Apply ROI` writes the region to the camera, snapping it to the camera's
+Width/Height/Offset step sizes, and saves it to `outputs/settings/flir_roi.json`.
+The last applied region is restored at the next app start; until one is saved,
+`config.imaging.captureRegion` is used. Values typed but not applied are not
+used, and the imaging preflight flags them. In the Live FLIR window, `Full Frame`
+shows the whole sensor, `Draw ROI` lets you drag a rectangle on the current
+frame (requires the Image Processing Toolbox), and `Apply ROI` uses it.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) before changing controller ownership.
 Physical-device validation remains a supervised lab step documented in

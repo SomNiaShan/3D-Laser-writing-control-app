@@ -75,6 +75,10 @@ config.imaging.autoExposureEnabled = true;
 config.imaging.autoExposureSampleCount = 5;
 config.imaging.autoExposureSafetyFactor = 0.8;
 config.imaging.captureTimeoutMs = 1500;
+% Used until an ROI is applied in the app; afterwards the saved ROI file wins.
 config.imaging.captureRegion = "top-left-quarter";
+% Initial Custom ROI fields, in full-sensor pixels.
+config.imaging.defaultCustomRoi = struct('OffsetX', 0, 'OffsetY', 0, 'Width', 512, 'Height', 512);
+config.imaging.roiSettingsFile = fullfile(fileparts(fileparts(mfilename('fullpath'))), 'outputs', 'settings', 'flir_roi.json');
 config.imaging.outputFolder = fullfile(fileparts(fileparts(mfilename('fullpath'))), 'outputs', '3d_imaging');
 end
