@@ -117,6 +117,10 @@ if isMakoDiscoveryProperty(object, propertyName)
     text = outputName + "=<mako-discovery-state>";
     return;
 end
+if isSlmSavedFileButtonEnable(object, propertyName)
+    text = outputName + "=<slm-saved-files-state>";
+    return;
+end
 if isAxesRenderVisibility(object, propertyName)
     text = outputName + "=<axes-render-state>";
     return;
@@ -153,6 +157,17 @@ dynamicStatusText = [ ...
     "Disconnected", "GenTL adaptor not available", ...
     "No camera detected", "Camera detected"];
 tf = isscalar(value) && any(value == dynamicStatusText);
+end
+
+function tf = isSlmSavedFileButtonEnable(object, propertyName)
+% The SLM tab enables its saved-pattern and saved-adjustment buttons only when
+% such files exist on disk, so their Enable state is not part of the layout.
+tf = false;
+if ~strcmp(propertyName, 'Enable') || ~isa(object, 'matlab.ui.control.Button')
+    return;
+end
+panel = ancestor(object, 'uipanel');
+tf = ~isempty(panel) && any(string(panel.Title) == ["Saved Patterns", "Saved Global Adjustments"]);
 end
 
 function tf = isAxesRenderVisibility(object, propertyName)

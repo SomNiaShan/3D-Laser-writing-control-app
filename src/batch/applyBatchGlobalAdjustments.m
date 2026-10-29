@@ -31,6 +31,9 @@ if isfinite(globalOptions.apertureRadiusPx)
     phase(~apertureMask) = 0;
 end
 
+% Last, so the lens and aperture move with the pattern as one piece.
+phase = slm_translate_phase(phase, globalOptions.patternOffsetXpx, globalOptions.patternOffsetYpx);
+
 adjustedPattern = pattern;
 adjustedPattern.name = [patternName(pattern), ' + global'];
 adjustedPattern.phaseData = phase;

@@ -300,37 +300,46 @@ helpers.createGridSplitter(exposureStackGrid, 1, 2, 'column', 1, 3);
 laserPanel = uipanel(exposureStackGrid, 'Title', 'Laser Control');
 laserPanel.Layout.Row = 1;
 laserPanel.Layout.Column = 1;
-laserGrid = uigridlayout(laserPanel, [5, 2], ...
+laserGrid = uigridlayout(laserPanel, [6, 2], ...
     'ColumnWidth', {'1x', '1x'}, ...
-    'RowHeight', {'fit', 'fit', 'fit', 'fit', 'fit'}, ...
+    'RowHeight', {'fit', 'fit', 'fit', 'fit', 'fit', 'fit'}, ...
     'Padding', [12, 12, 12, 12], ...
     'RowSpacing', 10);
 helpers.enableScrolling(laserGrid);
-helpers.createRightLabel(laserGrid, 'Manual Power (%)', 1, 1);
+appliedPowerTooltip = ['Power setpoint currently on the NI-DAQ. Manual Power changes it only ' ...
+    'after Apply Power; exposures, runs, and STOP leave it at 0 %. ' ...
+    '"-" means the DAQ is disconnected or a run is setting the power.'];
+appliedPowerLabel = helpers.createRightLabel(laserGrid, 'Applied Power', 1, 1);
+appliedPowerLabel.Tooltip = appliedPowerTooltip;
+controlUi.AppliedLaserPowerLabel = uilabel(laserGrid, 'Text', '-', ...
+    'Tooltip', appliedPowerTooltip);
+controlUi.AppliedLaserPowerLabel.Layout.Row = 1;
+controlUi.AppliedLaserPowerLabel.Layout.Column = 2;
+helpers.createRightLabel(laserGrid, 'Manual Power (%)', 2, 1);
 controlUi.LaserPowerField = uieditfield(laserGrid, 'numeric', 'Limits', [0 100]);
-controlUi.LaserPowerField.Layout.Row = 1; controlUi.LaserPowerField.Layout.Column = 2;
+controlUi.LaserPowerField.Layout.Row = 2; controlUi.LaserPowerField.Layout.Column = 2;
 controlUi.ApplyManualPowerButton = uibutton(laserGrid, 'Text', 'Apply Power', ...
     'ButtonPushedFcn', callbacks.applyManualPower, ...
     'Tooltip', 'Write the manual power setpoint to NI-DAQ without changing PP_EN');
-controlUi.ApplyManualPowerButton.Layout.Row = 2;
+controlUi.ApplyManualPowerButton.Layout.Row = 3;
 controlUi.ApplyManualPowerButton.Layout.Column = [1 2];
 controlUi.LaserOnButton = uibutton(laserGrid, 'Text', 'Laser ON', ...
     'ButtonPushedFcn', callbacks.laserOn);
-controlUi.LaserOnButton.Layout.Row = 3; controlUi.LaserOnButton.Layout.Column = 1;
+controlUi.LaserOnButton.Layout.Row = 4; controlUi.LaserOnButton.Layout.Column = 1;
 controlUi.LaserOffButton = uibutton(laserGrid, 'Text', 'Laser OFF', ...
     'ButtonPushedFcn', callbacks.laserOff);
-controlUi.LaserOffButton.Layout.Row = 3; controlUi.LaserOffButton.Layout.Column = 2;
-helpers.createRightLabel(laserGrid, 'Laser State', 4, 1);
+controlUi.LaserOffButton.Layout.Row = 4; controlUi.LaserOffButton.Layout.Column = 2;
+helpers.createRightLabel(laserGrid, 'Laser State', 5, 1);
 laserStateGrid = uigridlayout(laserGrid, [1, 2], ...
     'ColumnWidth', {22, '1x'}, ...
     'Padding', [0, 0, 0, 0], ...
     'ColumnSpacing', 8);
-laserStateGrid.Layout.Row = 4;
+laserStateGrid.Layout.Row = 5;
 laserStateGrid.Layout.Column = 2;
 controlUi.LaserStateLamp = uilamp(laserStateGrid, 'Color', [0.85, 0.2, 0.2]);
 controlUi.LaserStateLabel = uilabel(laserStateGrid, 'Text', 'Laser Off');
 lbl = uilabel(laserGrid, 'Text', 'Power: NI-DAQ; ON/OFF: PP_EN');
-lbl.Layout.Row = 5;
+lbl.Layout.Row = 6;
 lbl.Layout.Column = [1 2];
 
 carbideGrid = uigridlayout(carbideTab, [11, 4], ...

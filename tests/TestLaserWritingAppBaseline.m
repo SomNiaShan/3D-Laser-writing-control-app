@@ -1,7 +1,7 @@
 classdef TestLaserWritingAppBaseline < matlab.unittest.TestCase
     properties (Constant, Access = private)
-        ExpectedComponentCount = 531
-        ExpectedSignatureHash = "ebb010f57a5fc8d09db641b381fad3364fcb212011b31dbbeedd8d12063cb245"
+        ExpectedComponentCount = 645
+        ExpectedSignatureHash = "4a979327e08f68f4361ba188c9a61ac819c513d10f5eae4242ed2f39e903ffb7"
     end
 
     methods (TestClassSetup)

@@ -73,8 +73,20 @@ before enabling any output.
   is restored, then run a short 3D stack and check the preflight ROI line and
   the `OffsetX`/`OffsetY` columns in `metadata.csv`.
 - Mako: connect, monitor/alignment view, disconnect, reconnect, and app close.
-- SLM: open independent control, connect batch SLM, show selected pattern,
-  disconnect, and app close.
+- SLM: in the SLM tab connect, show a pattern, disconnect, and close the app
+  while connected (the HOLOEYE SLM display window must close). Connect batch
+  SLM, show the selected row, and disconnect. With a pattern shown, select a
+  global adjustment and nudge it with the arrow keys; then click the main Log
+  and press the arrow keys, and switch to another tab and press them: the SLM
+  must not change. During a run, a manual stage move, and with the laser on,
+  the SLM actions that ask for confirmation (Saved Patterns Delete, Saved Global
+  Adjustments Save/Delete, Reset) must refuse with a non-modal message while
+  STOP stays clickable.
+- SLM pattern offset: set Pattern X/Y offset in the SLM tab and confirm in the
+  SDK preview that +X moves the pattern right, +Y moves it down, and the
+  aperture moves with it. Show a batch row with the same offsets and confirm
+  the same placement. Run a short 3D stack and check the preflight SLM line and
+  the `SLMGlobalPatternOffsetX_px`/`SLMGlobalPatternOffsetY_px` metadata columns.
 
 ## Workflow checks
 

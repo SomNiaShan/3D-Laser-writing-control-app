@@ -52,7 +52,7 @@ classdef TestSafetyCoordinator < matlab.unittest.TestCase
             expected = [ ...
                 "stopFlirLive:false", "requestStageStop", "forceLaserSafeOff", ...
                 "stopFlirAcquisition", "deleteFlirLive", "stopPositionTimer", "stopCarbideTimer", ...
-                "closeSlmWindow", "disconnectBatchSlm", "shutdownMako", ...
+                "shutdownSlm", "disconnectBatchSlm", "shutdownMako", ...
                 "finalizeRunLog", "disconnectAll", "deleteFigure"];
             for failingCall = expected
                 [coordinator, calls] = makeCoordinator(failingCall);
@@ -83,7 +83,7 @@ ports.requestStageStop = @() record("requestStageStop");
 ports.forceLaserSafeOff = @() record("forceLaserSafeOff");
 ports.stopFlirAcquisition = @() record("stopFlirAcquisition");
 ports.stopCarbideTimer = @() record("stopCarbideTimer");
-ports.closeSlmWindow = @() record("closeSlmWindow");
+ports.shutdownSlm = @() record("shutdownSlm");
 ports.disconnectBatchSlm = @() record("disconnectBatchSlm");
 ports.shutdownMako = @() record("shutdownMako");
 ports.finalizeRunLog = @() record("finalizeRunLog");

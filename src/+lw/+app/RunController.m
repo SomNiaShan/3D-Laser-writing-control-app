@@ -182,6 +182,8 @@ classdef RunController < handle
         end
 
         function runResult = executeRunSnapshot(obj, runMode, preflight, resumeContext)
+            % Plan execution writes its own DAQ power values; cleanup resets them to 0.
+            obj.Model.State.laserPowerPercent = NaN;
             options = struct();
             options.shouldStopFcn = @() obj.Ports.stageLaser.isStopRequested();
             options.pauseRequestedFcn = @() obj.Ports.stageLaser.isPauseRequested();
@@ -305,6 +307,8 @@ classdef RunController < handle
                         resumeContext, sweepResult.errorMessage, recoveryAttempt, recoveryLimit);
                     if didRecover
                         startStepIndex = sweepResult.nextStepIndex;
+                        % Recovery forced the DAQ to 0; the retried step writes plan power again.
+                        obj.Model.State.laserPowerPercent = NaN;
                         continue;
                     end
 

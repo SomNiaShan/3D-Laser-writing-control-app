@@ -102,7 +102,8 @@ independent exception boundary:
 4. disable stage pulse trigger and force DAQ output to zero.
 5. Stop FLIR acquisition and delete acquisition/live timers.
 6. Stop position and Carbide timers.
-7. Close SLM, disconnect batch SLM, and shut down Mako.
+7. Shut down the SLM tab (closing its SLM), disconnect batch SLM, and shut
+   down Mako.
 8. Finalize the run log and disconnect all hardware.
 9. Delete the application figure.
 

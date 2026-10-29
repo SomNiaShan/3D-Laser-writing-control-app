@@ -78,6 +78,92 @@ classdef TestManualLaserControl < matlab.unittest.TestCase
             testCase.verifyEqual(calls.Value, "power:37");
         end
 
+        function appliedPowerChangesOnlyWhenDaqIsWritten(testCase)
+            [fig, controller, ~] = makeController();
+            cleanup = onCleanup(@() deleteIfValid(fig));
+            ui = controller.Model.Ui;
+            testCase.verifyEqual(ui.AppliedLaserPowerLabel.Text, '-');
+
+            controller.Model.State.laserPowerPercent = 0;
+            ui.LaserPowerField.Value = 2;
+            controller.UiPolicy.syncAll();
+            testCase.verifyEqual(ui.AppliedLaserPowerLabel.Text, '0 %');
+
+            controller.StageLaser.onApplyManualPower([], []);
+            testCase.verifyEqual(ui.AppliedLaserPowerLabel.Text, '2 %');
+
+            controller.StageLaser.forceLaserSafeOff();
+            controller.UiPolicy.syncAll();
+            testCase.verifyEqual(ui.AppliedLaserPowerLabel.Text, '0 %');
+        end
+
+        function appliedPowerShowsExposurePowerUntilSafeOff(testCase)
+            [fig, controller, ~] = makeController();
+            cleanup = onCleanup(@() deleteIfValid(fig));
+            label = controller.Model.Ui.AppliedLaserPowerLabel;
+            seen = ValueBox(strings(1, 0));
+            controller.Model.Services.laser.manualExposure = ...
+                @(varargin) recordLabelDuringExposure(seen, label);
+            controller.Model.State.laserPowerPercent = 2;
+            controller.Model.Ui.ExposureTimeField.Value = 1e6;
+            controller.Model.Ui.ExposureRepeatField.Value = 1;
+            controller.Model.Ui.ExposureIntervalField.Value = 0;
+            controller.Model.Ui.PreviewPowerField.Value = 37;
+
+            controller.StageLaser.fireExposureImpl();
+
+            testCase.verifyEqual(seen.Value, "37 %");
+            testCase.verifyEqual(label.Text, '0 %');
+        end
+
+        function planRunMarksAppliedPowerUnknown(testCase)
+            [fig, controller, ~] = makeController();
+            cleanup = onCleanup(@() deleteIfValid(fig));
+            label = controller.Model.Ui.AppliedLaserPowerLabel;
+            seen = ValueBox(strings(1, 0));
+            controller.Model.Services.execution.runPoint = ...
+                @(state, ~, ~, options) fakeRunPoint(seen, label, state, options);
+            controller.Model.State.laserPowerPercent = 2;
+            preflight = struct('trajectory', struct('x', 0), 'motion', struct());
+
+            controller.Run.executeRunSnapshot("Point Mode", preflight, []);
+
+            testCase.verifyEqual(seen.Value, "-");
+            testCase.verifyTrue(isnan(controller.Model.State.laserPowerPercent));
+        end
+
+        function zSweepRecoveryRetryKeepsAppliedPowerUnknown(testCase)
+            [fig, controller, calls] = makeController();
+            cleanup = onCleanup(@() deleteIfValid(fig));
+            timerCleanup = onCleanup(@() controller.StageLaser.stopPositionTimer());
+            label = controller.Model.Ui.AppliedLaserPowerLabel;
+            seen = ValueBox(strings(1, 0));
+            attempts = ValueBox(0);
+            center = controller.Model.Config.motion.centerPosition;
+            controller.Model.Services.stage.connect = ...
+                @(state, ~) recordConnection(calls, state);
+            controller.Model.Services.stage.stop = @(~) [];
+            controller.Model.Services.stage.moveAbsolute = @(state, ~, ~, ~) deal(state, false);
+            controller.Model.Services.execution.runZSweep = ...
+                @(state, ~, ~, options) fakeRecoveringZSweep( ...
+                    attempts, seen, label, state, options, center);
+            controller.Model.State.currentPosition = center;
+            sweep = struct('x', center.x, 'displayY', 0, 'powerPercent', 10, ...
+                'sweepSpeedMmPerSecond', 1, 'returnSpeedMmPerSecond', 1, ...
+                'repeatCount', 1, 'exposureDirection', "Back -> Front", ...
+                'preMoveMotion', struct());
+            preflight = struct('sweepJobs', struct('sweep', sweep), 'progressTotal', 3);
+            options = struct( ...
+                'shouldStopFcn', @() false, ...
+                'pauseRequestedFcn', @() false, ...
+                'laserStateFcn', @(isOn) controller.StageLaser.setLaserState(isOn));
+
+            controller.Run.runZSweepJobs(preflight, options, []);
+
+            testCase.verifyEqual(attempts.Value, 2);
+            testCase.verifyEqual(seen.Value, "-");
+        end
+
         function forcedSafeOffStillClearsDaq(testCase)
             [fig, controller, calls] = makeController();
             cleanup = onCleanup(@() deleteIfValid(fig));
@@ -185,6 +271,31 @@ if wasStopped
 end
 laserStateFcn(true);
 laserStateFcn(false);
+end
+
+function wasStopped = recordLabelDuringExposure(seen, label)
+seen.Value(end + 1) = string(label.Text);
+wasStopped = false;
+end
+
+function [state, result] = fakeRunPoint(seen, label, state, options)
+options.laserStateFcn(true);
+seen.Value(end + 1) = string(label.Text);
+options.laserStateFcn(false);
+result = struct('status', "finished", 'returnTarget', state.currentPosition);
+end
+
+function [state, result] = fakeRecoveringZSweep(attempts, seen, label, state, options, target)
+attempts.Value = attempts.Value + 1;
+if attempts.Value == 1
+    result = struct('status', "hardware_error", 'nextStepIndex', 1, ...
+        'returnTarget', target, 'errorMessage', "Injected Zaber error");
+    return;
+end
+options.laserStateFcn(true);
+seen.Value(end + 1) = string(label.Text);
+options.laserStateFcn(false);
+result = struct('status', "finished", 'nextStepIndex', 1, 'returnTarget', target);
 end
 
 function deleteIfValid(fig)

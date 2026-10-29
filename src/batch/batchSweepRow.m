@@ -54,6 +54,10 @@ switch string(parameterName)
         prefix = "apx";
     case "GlobalApertureCenterYpx"
         prefix = "apy";
+    case "GlobalPatternOffsetXpx"
+        prefix = "pox";
+    case "GlobalPatternOffsetYpx"
+        prefix = "poy";
     otherwise
         prefix = string(parameterName);
 end

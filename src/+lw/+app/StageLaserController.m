@@ -359,6 +359,8 @@ classdef StageLaserController < handle
         end
 
         function didBegin = beginPausedManualStageOperation(obj)
+            % Set for every manual move, paused or not; the SLM tab waits on it.
+            obj.Model.ManualStageMoveActive = true;
             didBegin = obj.Model.State.isPaused && ~obj.Model.State.isBusy && ~obj.Model.PausedManualMotionActive;
             if ~didBegin
                 return;
@@ -369,6 +371,7 @@ classdef StageLaserController < handle
         end
 
         function finishPausedManualStageOperation(obj, didBegin)
+            obj.Model.ManualStageMoveActive = false;
             if ~didBegin
                 return;
             end
@@ -413,6 +416,7 @@ classdef StageLaserController < handle
             obj.requireLaserReady();
             powerPercent = obj.Model.Ui.LaserPowerField.Value;
             obj.Model.Services.laser.setPower(obj.Model.State, powerPercent);
+            obj.Model.State.laserPowerPercent = powerPercent;
         end
 
         function onLaserOff(obj, ~, ~)
@@ -452,6 +456,7 @@ classdef StageLaserController < handle
 
             obj.Model.State.stopRequested = false;
             obj.Model.State.isBusy = true;
+            obj.Model.State.laserPowerPercent = powerPercent;
             obj.Model.RunProgressText = sprintf('0 / %d', repeatCount);
             obj.Model.RunCurrentText = "Manual exposure";
             obj.Ports.logMessage(sprintf('Manual exposure started: %d repeats.', repeatCount));
@@ -509,6 +514,7 @@ classdef StageLaserController < handle
 
             obj.Model.State.stopRequested = false;
             obj.Model.State.isBusy = true;
+            obj.Model.State.laserPowerPercent = powerPercent;
             obj.Model.RunProgressText = sprintf('0 / %d', repeatCount);
             obj.Model.RunCurrentText = "Manual stream exposure";
             obj.Ports.logMessage(sprintf( ...
@@ -725,8 +731,10 @@ classdef StageLaserController < handle
             try
                 if obj.areDAQConnected()
                     obj.Model.Services.daq.write(obj.Model.State.daq, 0);
+                    obj.Model.State.laserPowerPercent = 0;
                 end
             catch
+                obj.Model.State.laserPowerPercent = NaN;
             end
         end
 

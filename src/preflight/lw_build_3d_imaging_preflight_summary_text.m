@@ -54,8 +54,20 @@ end
 if isfield(snapshot, 'currentOnSlm')
     currentOnSlm = string(snapshot.currentOnSlm);
 end
-textValue = sprintf('Using current Bessel params (%s), current on SLM: %s, updated %s', ...
-    char(filenameToken), char(currentOnSlm), char(updatedAt));
+textValue = sprintf('Using current Bessel params (%s), current on SLM: %s, updated %s%s', ...
+    char(filenameToken), char(currentOnSlm), char(updatedAt), formatPatternOffset(snapshot));
+end
+
+function textValue = formatPatternOffset(snapshot)
+textValue = '';
+if ~isfield(snapshot, 'globalAdjustments') || ~isstruct(snapshot.globalAdjustments)
+    return;
+end
+adjustments = snapshot.globalAdjustments;
+if isfield(adjustments, 'patternOffsetXpx') && isfield(adjustments, 'patternOffsetYpx')
+    textValue = sprintf(', pattern offset X %+g px, Y %+g px', ...
+        double(adjustments.patternOffsetXpx), double(adjustments.patternOffsetYpx));
+end
 end
 
 function textValue = connectionText(isConnected)

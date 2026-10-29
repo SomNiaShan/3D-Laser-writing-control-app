@@ -87,6 +87,13 @@ classdef UiPolicyController < handle
             obj.Model.Ui.StatusLaserStateLabel.Text = sprintf('Laser State: %s', onOff(isLaserOn));
             obj.Model.Ui.LaserStateLamp.Color = lampColor(isLaserOn);
             obj.Model.Ui.LaserStateLabel.Text = sprintf('Laser %s', onOff(isLaserOn));
+
+            powerPercent = NaN;
+            if isfield(obj.Model.State, 'laserPowerPercent') && obj.Ports.stageLaser.areDAQConnected()
+                powerPercent = obj.Model.State.laserPowerPercent;
+            end
+            obj.Model.Ui.AppliedLaserPowerLabel.Text = ternary(isfinite(powerPercent), ...
+                sprintf('%g %%', powerPercent), '-');
         end
 
         function syncPositionFields(~)

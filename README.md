@@ -43,12 +43,14 @@ Run lifecycle stress and the locked screenshot comparison with:
 report = run_refactor_checks(IncludeStress=true, IncludeScreenshots=true);
 ```
 
-The locked GUI contract is 531 objects. Its normalized signature is recorded
+The locked GUI contract is 645 objects. Its normalized signature is recorded
 in `tests/TestLaserWritingAppBaseline.m`.
 Mako device-discovery availability is normalized because it is runtime
-hardware state rather than a static GUI property. The `Visible` value of
-UIAxes and their title text is normalized too: the app never sets it, and it
-differs between otherwise identical launches.
+hardware state rather than a static GUI property. The `Enable` state of the
+SLM tab's saved-pattern and saved-adjustment buttons is normalized for the same
+reason: it depends on which files exist in `slm_control/patterns`. The
+`Visible` value of UIAxes and their title text is normalized too: the app never
+sets it, and it differs between otherwise identical launches.
 
 ## Plan-driven execution
 
@@ -160,6 +162,46 @@ The last applied region is restored at the next app start; until one is saved,
 used, and the imaging preflight flags them. In the Live FLIR window, `Full Frame`
 shows the whole sensor, `Draw ROI` lets you drag a rectangle on the current
 frame (requires the Image Processing Toolbox), and `Apply ROI` uses it.
+
+## SLM tab
+
+The SLM tab holds the SLM control itself (Main, Global Adjustments, and
+Diagnostics); there is no separate SLM window. `lw_slm_control_app()` still
+opens the same control as a standalone figure without the main app. The SLM
+stays connected until you press `Disconnect SLM` or close the app. To watch
+the beam while adjusting the SLM, use `Pop Out View` on the Mako tab.
+
+The control shares the main window, so its dialogs must never cover STOP: SLM
+errors are non-modal, and the actions that ask for confirmation (Delete under
+Saved Patterns, Save and Delete under Saved Global Adjustments, and Reset) are
+refused while a run, exposure, pause, manual stage move, or manual laser output
+is active. The arrow keys nudge the selected global adjustment only while the
+SLM tab and its Global Adjustments page are showing; a click anywhere else ends
+the selection.
+
+3D imaging names its output and fills the SLM columns of `metadata.csv` from
+the SLM tab only while the tab is connected and showing a pattern, or from the
+last batch row shown on the batch SLM. Otherwise the stack is untagged and the
+preflight reports no current SLM parameters.
+
+## SLM pattern offset
+
+`Pattern X offset px (+right)` and `Pattern Y offset px (+down)` in the SLM
+tab's Global Adjustments page move the whole displayed pattern across the
+panel by whole pixels, for example to keep the beam off a damaged area. The
+move is applied after the lens, X/Y shift, and aperture, so the aperture moves
+with the pattern and `Aperture X/Y center px` stay relative to the pattern
+center. Pixels pushed past the panel edge are dropped and uncovered pixels get
+zero phase. `X/Y shift 2π` is different: it adds a phase ramp that steers the
+beam and does not move the pattern on the panel. Realign the beam onto the new
+area first, then adjust the offset until the pattern is centered on the beam.
+
+Global adjustment presets store the offset. App startup, `Reset`, presets saved
+before the offset existed, and new batch rows use `patternOffsetXpx` and
+`patternOffsetYpx` from `slm_control/config/slm_config.m`. Batch rows carry the
+offset in `GlobalPatternOffsetXpx`/`GlobalPatternOffsetYpx` (whole pixels; both
+can be swept), the 3D imaging preflight shows it, and `metadata.csv` records it
+as `SLMGlobalPatternOffsetX_px`/`SLMGlobalPatternOffsetY_px`.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) before changing controller ownership.
 Physical-device validation remains a supervised lab step documented in

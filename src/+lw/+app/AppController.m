@@ -148,7 +148,7 @@ classdef AppController < handle
                 'deleteFlirLive', @() obj.Flir.flirLive('delete'), ...
                 'stopPositionTimer', @() obj.StageLaser.stopPositionTimer(), ...
                 'stopCarbideTimer', @() obj.Carbide.stopCarbideStatusTimer(), ...
-                'closeSlmWindow', @obj.closeSlmControlWindow, ...
+                'shutdownSlm', @obj.shutdownSlmController, ...
                 'disconnectBatchSlm', @obj.disconnectBatchSlmForShutdown, ...
                 'shutdownMako', @obj.shutdownMakoController, ...
                 'finalizeRunLog', @obj.finalizeRunLogForShutdown, ...
@@ -219,10 +219,17 @@ classdef AppController < handle
         end
 
         function buildSlmTab(obj, tab)
-            callbacks = struct( ...
-                'openSlmControl', @(~, ~) obj.runUiAction(@() obj.openSlmControlWindowImpl(), ...
-                    'Failed to open SLM control'));
-            obj.mergeUi(lw_build_slm_tab(tab, callbacks));
+            options = struct( ...
+                'hostBusyFcn', @obj.isHardwareActive, ...
+                'dialogs', obj.Model.Services.dialog);
+            obj.Model.SlmController = obj.Model.Services.slm.create(tab, options);
+        end
+
+        function tf = isHardwareActive(obj)
+            % The SLM tab's confirmations are modal over STOP, so they wait for this.
+            state = obj.Model.State;
+            tf = state.isBusy || state.isPaused || obj.Model.PausedManualMotionActive || ...
+                obj.Model.ManualStageMoveActive || (isfield(state, 'laserIsOn') && state.laserIsOn);
         end
 
         function buildControlTab(obj, tab)
@@ -403,34 +410,6 @@ classdef AppController < handle
             obj.runUiAction(@() obj.connectAllImpl(), 'Failed to connect all hardware');
         end
 
-        function openSlmControlWindowImpl(obj)
-            if isValidUiHandle(obj.Model.Ui.SlmControlFigure)
-                figure(obj.Model.Ui.SlmControlFigure);
-                try
-                    obj.Model.Ui.SlmControlFigure.Visible = 'on';
-                catch
-                end
-                return;
-            end
-
-            obj.Model.Ui.SlmControlFigure = obj.Model.Services.slm.openControl();
-            obj.logMessage('SLM control window opened.');
-        end
-
-        function closeSlmControlWindow(obj)
-            slmFigure = [];
-            if isfield(obj.Model.Ui, 'SlmControlFigure')
-                slmFigure = obj.Model.Ui.SlmControlFigure;
-            end
-            obj.Model.Ui.SlmControlFigure = [];
-            try
-                if isValidUiHandle(slmFigure)
-                    close(slmFigure);
-                end
-            catch
-            end
-        end
-
         function connectAllImpl(obj)
             failureMessages = strings(1, 0);
             attemptedCount = 0;
@@ -517,6 +496,17 @@ classdef AppController < handle
             end
             try
                 obj.Model.Services.mako.shutdown(obj.Model.MakoController);
+            catch
+            end
+        end
+
+        function shutdownSlmController(obj)
+            if isempty(obj.Model.SlmController) || ~isstruct(obj.Model.SlmController) || ...
+                    ~isfield(obj.Model.SlmController, 'shutdown')
+                return
+            end
+            try
+                obj.Model.Services.slm.shutdown(obj.Model.SlmController);
             catch
             end
         end
