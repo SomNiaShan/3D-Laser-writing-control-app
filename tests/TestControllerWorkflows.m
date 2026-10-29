@@ -39,6 +39,17 @@ classdef TestControllerWorkflows < matlab.unittest.TestCase
             controller.Trajectory.importTrajectoryImpl();
             controller.UiPolicy.syncAll();
             testCase.verifyEqual(model.State.trajectory, model.Trajectory);
+            testCase.verifyEqual(model.PreparedPlan.kind, "point");
+            testCase.verifyEqual(controller.Run.selectedRunMode(), "Point Mode");
+            frozenDwell = model.PreparedPlan.defaultDwellSeconds;
+            model.Ui.PointExposureField.Value = ...
+                model.Ui.PointExposureField.Value + 100;
+            controller.Trajectory.onPlanInputChanged([], []);
+            testCase.verifyTrue(model.TrajectoryInputsDirty);
+            testCase.verifyEqual( ...
+                model.PreparedPlan.defaultDwellSeconds, frozenDwell);
+            controller.Trajectory.importTrajectoryImpl();
+            testCase.verifyFalse(model.TrajectoryInputsDirty);
 
             model.Ui.PlanPowerField.Value = 8;
             controller.Trajectory.onPlanPowerChanged([], []);
@@ -52,11 +63,51 @@ classdef TestControllerWorkflows < matlab.unittest.TestCase
             framePlan = controller.Trajectory.buildTrajectoryFromUi();
             testCase.verifyEqual(numel(framePlan.x), 36);
             testCase.verifyTrue(all(framePlan.power == model.Ui.PlanPowerField.Value));
+            testCase.verifyTrue(isfield(model.Ui, 'UseFixedPowerCheckBox'));
             testCase.verifyFalse(isfield(model.Ui, 'UseImportedPowerCheckBox'));
             testCase.verifyFalse(isfield(model.Ui, 'StreamFixedPowerField'));
+            testCase.verifyFalse(isfield(model.Ui, 'RunModeGroup'));
+            testCase.verifyFalse(isfield(model.Ui, 'StreamModeRadio'));
+            testCase.verifyTrue(isfield(model.Ui, 'ZSweepRadio'));
+
+            pathTrajectory = lw_make_trajectory(0, 0, 0, 10, ...
+                "writing_plan", "path", struct('powerSource', "file"));
+            pathTrajectory.writingPlan = table( ...
+                "path", 'VariableNames', {'operation'});
+            pathPlan = controller.Trajectory.preparedTrajectoryPlan( ...
+                pathTrajectory, "Imported Points");
+            previousPlan = model.PreparedPlan;
+            model.PreparedPlan = pathPlan;
+            testCase.verifyEqual(pathPlan.kind, "path");
+            testCase.verifyEqual(controller.Run.selectedRunMode(), "Path Plan Mode");
+            model.PreparedPlan = previousPlan;
+
+            folder = tempname;
+            mkdir(folder);
+            folderCleanup = onCleanup(@() rmdir(folder, 's'));
+            pointsPath = fullfile(folder, 'points.csv');
+            writematrix([0, 0, 0, 4; 1, 2, 3, 9], pointsPath);
+            model.Ui.ImportedPointsRadio.Value = true;
+            controller.Trajectory.onSourceModeChanged([], []);
+            model.Ui.InputFileField.Value = pointsPath;
+            model.Ui.UseFixedPowerCheckBox.Value = false;
+            controller.UiPolicy.syncAll();
+            testCase.verifyEqual(string(model.Ui.PlanPowerField.Enable), "off");
+            controller.Trajectory.importTrajectoryImpl();
+            testCase.verifyEqual(model.Trajectory.power, [4; 9]);
+
+            model.Ui.UseFixedPowerCheckBox.Value = true;
+            controller.Trajectory.onFixedPowerOverrideChanged([], []);
+            testCase.verifyTrue(model.TrajectoryInputsDirty);
+            testCase.verifyEqual(string(model.Ui.PlanPowerField.Enable), "on");
+            model.Ui.PlanPowerField.Value = 13;
+            controller.Trajectory.importTrajectoryImpl();
+            testCase.verifyEqual(model.Trajectory.power, [13; 13]);
+            clear folderCleanup;
 
             center = model.Config.motion.centerPosition;
-            model.Ui.ZSweepModeRadio.Value = true;
+            model.Ui.ZSweepRadio.Value = true;
+            controller.Trajectory.onSourceModeChanged([], []);
             model.Ui.ZSweepMatrixCheckBox.Value = false;
             model.Ui.ZSweepXField.Value = center.x;
             model.Ui.ZSweepYField.Value = ...
@@ -68,7 +119,24 @@ classdef TestControllerWorkflows < matlab.unittest.TestCase
             model.Ui.ZSweepReturnSpeedField.Value = 1;
             preview = controller.Trajectory.buildZSweepPreviewFromUi();
             testCase.verifyFalse(preview.isMatrix);
+            controller.Trajectory.prepareZSweepPlanImpl();
+            testCase.verifyEqual(model.PreparedPlan.kind, "z_sweep");
             testCase.verifyEqual(controller.Run.selectedRunMode(), "Z Sweep Mode");
+            frozenSweepX = model.PreparedPlan.sweep.x;
+            model.Ui.ZSweepXField.Value = frozenSweepX + 0.1;
+            controller.Trajectory.onZSweepPreviewChanged([], []);
+            testCase.verifyTrue(model.TrajectoryInputsDirty);
+            testCase.verifyEqual(model.PreparedPlan.sweep.x, frozenSweepX);
+            controller.Trajectory.prepareZSweepPlanImpl();
+            testCase.verifyFalse(model.TrajectoryInputsDirty);
+            model.Ui.ZSweepMatrixCheckBox.Value = true;
+            controller.Trajectory.onZSweepMatrixChanged([], []);
+            controller.Trajectory.prepareZSweepPlanImpl();
+            testCase.verifyTrue(model.PreparedPlan.isMatrix);
+            testCase.verifyEqual(numel(model.PreparedPlan.sweepJobs), 9);
+            testCase.verifyEqual( ...
+                model.PreparedPlan.progressTotal, ...
+                model.PreparedPlan.matrix.progressTotal);
             controller.UiPolicy.syncAll();
 
             runResult = controller.Run.makeRunResult("test");

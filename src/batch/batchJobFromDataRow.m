@@ -43,6 +43,8 @@ end
 globalOptions.apertureRadiusPx = apertureRadiusPx;
 globalOptions.apertureCenterXpx = numericCell(rowData, 'GlobalApertureCenterXpx', tableIndex, false);
 globalOptions.apertureCenterYpx = numericCell(rowData, 'GlobalApertureCenterYpx', tableIndex, false);
+globalOptions.patternOffsetXpx = wholePixelCell(rowData, 'GlobalPatternOffsetXpx', tableIndex);
+globalOptions.patternOffsetYpx = wholePixelCell(rowData, 'GlobalPatternOffsetYpx', tableIndex);
 job.globalAdjustments = globalOptions;
 
 job.slmSettleSeconds = numericCell(rowData, 'SlmSettleSeconds', tableIndex, false);
@@ -83,6 +85,13 @@ function value = numericCell(rowData, columnName, tableIndex, allowInf)
 rawValue = rowData{batchColumnIndex(columnName)};
 label = sprintf('Batch row %d %s', tableIndex, columnName);
 value = numericScalar(rawValue, label, allowInf);
+end
+
+function value = wholePixelCell(rowData, columnName, tableIndex)
+value = numericCell(rowData, columnName, tableIndex, false);
+if value ~= round(value)
+    error('Batch row %d %s must be a whole number of pixels.', tableIndex, columnName);
+end
 end
 
 function value = numericScalar(rawValue, label, allowInf)

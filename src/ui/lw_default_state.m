@@ -23,6 +23,7 @@ state.pauseRequested = false;
 state.isPaused = false;
 state.resumeContext = [];
 state.laserIsOn = false;
+state.laserPowerPercent = NaN;
 state.currentPosition = struct('x', NaN, 'y', NaN, 'z', NaN);
 state.marks = struct('mark0', [], 'mark1', [], 'mark2', []);
 state.trajectory = [];

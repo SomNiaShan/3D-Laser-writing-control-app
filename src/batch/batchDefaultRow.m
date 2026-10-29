@@ -1,5 +1,6 @@
 function row = batchDefaultRow(rowIndex)
 defaults = slm_default_drill_beam_options();
+slmCfg = slm_config();
 row = cell(1, numel(batchColumnNames()));
 row{batchColumnIndex('Enabled')} = true;
 row{batchColumnIndex('Name')} = sprintf('beam_%03d', rowIndex);
@@ -22,6 +23,8 @@ row{batchColumnIndex('GlobalYShift2Pi')} = 0;
 row{batchColumnIndex('GlobalApertureRadiusPx')} = 0;
 row{batchColumnIndex('GlobalApertureCenterXpx')} = 0;
 row{batchColumnIndex('GlobalApertureCenterYpx')} = 0;
+row{batchColumnIndex('GlobalPatternOffsetXpx')} = slmCfg.patternOffsetXpx;
+row{batchColumnIndex('GlobalPatternOffsetYpx')} = slmCfg.patternOffsetYpx;
 row{batchColumnIndex('SlmSettleSeconds')} = 0.2;
 row{batchColumnIndex('Notes')} = '';
 end

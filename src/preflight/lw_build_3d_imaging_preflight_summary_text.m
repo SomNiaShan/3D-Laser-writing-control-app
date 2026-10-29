@@ -10,6 +10,7 @@ summaryText = sprintf([ ...
     'FLIR Exposure: %.6g us\n', ...
     'Auto Exposure: %s\n', ...
     'FLIR Gain: %.6g dB\n', ...
+    'FLIR ROI: %s\n', ...
     'Capture Timeout: %d ms\n', ...
     'Output Folder: %s\n', ...
     'TIFF Stack: %s\n', ...
@@ -19,28 +20,24 @@ summaryText = sprintf([ ...
     preflight.x, preflight.displayY, preflight.zStart, preflight.zEnd, ...
     preflight.zStep, preflight.settlingTime, preflight.exposureUs, ...
     char(formatAutoExposurePreflightSummary(preflight)), ...
-    preflight.gain, preflight.captureTimeoutMs, preflight.runFolder, preflight.stackFile, ...
+    preflight.gain, char(formatRoiPreflightSummary(preflight)), ...
+    preflight.captureTimeoutMs, preflight.runFolder, preflight.stackFile, ...
     char(formatSlmPreflightSummary(preflight.slmSnapshot, preflight.slmFilenameToken)), ...
     connectionText(stagesConnected), connectionText(flirConnected));
 end
 
 function textValue = formatAutoExposurePreflightSummary(preflight)
 textValue = "Off";
-if ~isfield(preflight, 'autoExposure') || ~isstruct(preflight.autoExposure) || ...
-        ~isfield(preflight.autoExposure, 'enabled') || ~logical(preflight.autoExposure.enabled)
-    return;
+if isfield(preflight, 'autoExposure')
+    textValue = lw_format_auto_exposure_summary(preflight.autoExposure);
+end
 end
 
-sampleCount = 0;
-if isfield(preflight.autoExposure, 'sampleCount')
-    sampleCount = preflight.autoExposure.sampleCount;
+function textValue = formatRoiPreflightSummary(preflight)
+textValue = "-";
+if isfield(preflight, 'flirRoiText') && strlength(string(preflight.flirRoiText)) > 0
+    textValue = string(preflight.flirRoiText);
 end
-safetyFactor = 0.8;
-if isfield(preflight.autoExposure, 'safetyFactor')
-    safetyFactor = preflight.autoExposure.safetyFactor;
-end
-safetyPercent = 100 * safetyFactor;
-textValue = sprintf('On (%d Z samples, %.0f%% no-clip target)', sampleCount, safetyPercent);
 end
 
 function textValue = formatSlmPreflightSummary(snapshot, filenameToken)
@@ -57,8 +54,20 @@ end
 if isfield(snapshot, 'currentOnSlm')
     currentOnSlm = string(snapshot.currentOnSlm);
 end
-textValue = sprintf('Using current Bessel params (%s), current on SLM: %s, updated %s', ...
-    char(filenameToken), char(currentOnSlm), char(updatedAt));
+textValue = sprintf('Using current Bessel params (%s), current on SLM: %s, updated %s%s', ...
+    char(filenameToken), char(currentOnSlm), char(updatedAt), formatPatternOffset(snapshot));
+end
+
+function textValue = formatPatternOffset(snapshot)
+textValue = '';
+if ~isfield(snapshot, 'globalAdjustments') || ~isstruct(snapshot.globalAdjustments)
+    return;
+end
+adjustments = snapshot.globalAdjustments;
+if isfield(adjustments, 'patternOffsetXpx') && isfield(adjustments, 'patternOffsetYpx')
+    textValue = sprintf(', pattern offset X %+g px, Y %+g px', ...
+        double(adjustments.patternOffsetXpx), double(adjustments.patternOffsetYpx));
+end
 end
 
 function textValue = connectionText(isConnected)

@@ -1,9 +1,12 @@
 function state = lw_connect_stages(state, config)
 %LW_CONNECT_STAGES Connect to the Zaber stages and cache axis handles.
 
-import zaber.motion.ascii.*;
+lw_ensure_zaber_motion_library();
 
-state.conn = Connection.openSerialPort(config.stage.comPort);
+state.conn = javaMethod( ...
+    'openSerialPort', ...
+    'zaber.motion.ascii.Connection', ...
+    char(config.stage.comPort));
 devices = state.conn.detectDevices();
 
 state.devices.x = devices(config.stage.deviceOrder.x);

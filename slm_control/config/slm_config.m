@@ -27,4 +27,11 @@ config.expectedWidthPx = 1920;
 config.expectedHeightPx = 1080;
 config.pixelPitchUm = 8.0;
 config.phaseUnit = 2*pi;
+
+% Default whole-pixel move of every displayed pattern (+X right, +Y down),
+% e.g. to keep the beam off a damaged part of the panel. SLM Control global
+% adjustments (startup, Reset, presets without an offset) and new batch rows
+% start from these values.
+config.patternOffsetXpx = 0;
+config.patternOffsetYpx = 0;
 end

@@ -300,32 +300,46 @@ helpers.createGridSplitter(exposureStackGrid, 1, 2, 'column', 1, 3);
 laserPanel = uipanel(exposureStackGrid, 'Title', 'Laser Control');
 laserPanel.Layout.Row = 1;
 laserPanel.Layout.Column = 1;
-laserGrid = uigridlayout(laserPanel, [4, 2], ...
+laserGrid = uigridlayout(laserPanel, [6, 2], ...
     'ColumnWidth', {'1x', '1x'}, ...
-    'RowHeight', {'fit', 'fit', 'fit', 'fit'}, ...
+    'RowHeight', {'fit', 'fit', 'fit', 'fit', 'fit', 'fit'}, ...
     'Padding', [12, 12, 12, 12], ...
     'RowSpacing', 10);
 helpers.enableScrolling(laserGrid);
-helpers.createRightLabel(laserGrid, 'Manual Power (%)', 1, 1);
+appliedPowerTooltip = ['Power setpoint currently on the NI-DAQ. Manual Power changes it only ' ...
+    'after Apply Power; exposures, runs, and STOP leave it at 0 %. ' ...
+    '"-" means the DAQ is disconnected or a run is setting the power.'];
+appliedPowerLabel = helpers.createRightLabel(laserGrid, 'Applied Power', 1, 1);
+appliedPowerLabel.Tooltip = appliedPowerTooltip;
+controlUi.AppliedLaserPowerLabel = uilabel(laserGrid, 'Text', '-', ...
+    'Tooltip', appliedPowerTooltip);
+controlUi.AppliedLaserPowerLabel.Layout.Row = 1;
+controlUi.AppliedLaserPowerLabel.Layout.Column = 2;
+helpers.createRightLabel(laserGrid, 'Manual Power (%)', 2, 1);
 controlUi.LaserPowerField = uieditfield(laserGrid, 'numeric', 'Limits', [0 100]);
-controlUi.LaserPowerField.Layout.Row = 1; controlUi.LaserPowerField.Layout.Column = 2;
+controlUi.LaserPowerField.Layout.Row = 2; controlUi.LaserPowerField.Layout.Column = 2;
+controlUi.ApplyManualPowerButton = uibutton(laserGrid, 'Text', 'Apply Power', ...
+    'ButtonPushedFcn', callbacks.applyManualPower, ...
+    'Tooltip', 'Write the manual power setpoint to NI-DAQ without changing PP_EN');
+controlUi.ApplyManualPowerButton.Layout.Row = 3;
+controlUi.ApplyManualPowerButton.Layout.Column = [1 2];
 controlUi.LaserOnButton = uibutton(laserGrid, 'Text', 'Laser ON', ...
     'ButtonPushedFcn', callbacks.laserOn);
-controlUi.LaserOnButton.Layout.Row = 2; controlUi.LaserOnButton.Layout.Column = 1;
+controlUi.LaserOnButton.Layout.Row = 4; controlUi.LaserOnButton.Layout.Column = 1;
 controlUi.LaserOffButton = uibutton(laserGrid, 'Text', 'Laser OFF', ...
     'ButtonPushedFcn', callbacks.laserOff);
-controlUi.LaserOffButton.Layout.Row = 2; controlUi.LaserOffButton.Layout.Column = 2;
-helpers.createRightLabel(laserGrid, 'Laser State', 3, 1);
+controlUi.LaserOffButton.Layout.Row = 4; controlUi.LaserOffButton.Layout.Column = 2;
+helpers.createRightLabel(laserGrid, 'Laser State', 5, 1);
 laserStateGrid = uigridlayout(laserGrid, [1, 2], ...
     'ColumnWidth', {22, '1x'}, ...
     'Padding', [0, 0, 0, 0], ...
     'ColumnSpacing', 8);
-laserStateGrid.Layout.Row = 3;
+laserStateGrid.Layout.Row = 5;
 laserStateGrid.Layout.Column = 2;
 controlUi.LaserStateLamp = uilamp(laserStateGrid, 'Color', [0.85, 0.2, 0.2]);
 controlUi.LaserStateLabel = uilabel(laserStateGrid, 'Text', 'Laser Off');
-lbl = uilabel(laserGrid, 'Text', 'Stage IO pulse trigger control');
-lbl.Layout.Row = 4;
+lbl = uilabel(laserGrid, 'Text', 'Power: NI-DAQ; ON/OFF: PP_EN');
+lbl.Layout.Row = 6;
 lbl.Layout.Column = [1 2];
 
 carbideGrid = uigridlayout(carbideTab, [11, 4], ...
@@ -349,20 +363,28 @@ controlUi.CarbideActualFrequencyLabel.Layout.Row = 2; controlUi.CarbideActualFre
 helpers.createRightLabel(carbideGrid, 'Actual PP', 3, 1);
 controlUi.CarbideActualPpLabel = uilabel(carbideGrid, 'Text', '-');
 controlUi.CarbideActualPpLabel.Layout.Row = 3; controlUi.CarbideActualPpLabel.Layout.Column = 2;
-helpers.createRightLabel(carbideGrid, 'Pulse (fs)', 3, 3);
+periodTooltip = ['Derived from the actual output frequency: period (us) = 1000 / frequency (kHz). ' ...
+    'Use it to compare with the gate width; it does not imply pulse synchronization.'];
+periodLabel = helpers.createRightLabel(carbideGrid, 'Period (us)', 3, 3);
+periodLabel.Tooltip = periodTooltip;
+controlUi.CarbideRepetitionPeriodLabel = uilabel(carbideGrid, 'Text', '-', ...
+    'Tooltip', periodTooltip);
+controlUi.CarbideRepetitionPeriodLabel.Layout.Row = 3;
+controlUi.CarbideRepetitionPeriodLabel.Layout.Column = 4;
+
+helpers.createRightLabel(carbideGrid, 'Pulse (fs)', 4, 1);
 controlUi.CarbideActualPulseLabel = uilabel(carbideGrid, 'Text', '-');
-controlUi.CarbideActualPulseLabel.Layout.Row = 3; controlUi.CarbideActualPulseLabel.Layout.Column = 4;
-
-helpers.createRightLabel(carbideGrid, 'Output', 4, 1);
-controlUi.CarbideOutputEnabledLabel = uilabel(carbideGrid, 'Text', '-');
-controlUi.CarbideOutputEnabledLabel.Layout.Row = 4; controlUi.CarbideOutputEnabledLabel.Layout.Column = 2;
-helpers.createRightLabel(carbideGrid, 'Shutter', 4, 3);
-controlUi.CarbideShutterStateLabel = uilabel(carbideGrid, 'Text', '-');
-controlUi.CarbideShutterStateLabel.Layout.Row = 4; controlUi.CarbideShutterStateLabel.Layout.Column = 4;
-
-helpers.createRightLabel(carbideGrid, 'Pulse E (uJ)', 5, 1);
+controlUi.CarbideActualPulseLabel.Layout.Row = 4; controlUi.CarbideActualPulseLabel.Layout.Column = 2;
+helpers.createRightLabel(carbideGrid, 'Pulse E (uJ)', 4, 3);
 controlUi.CarbidePulseEnergyLabel = uilabel(carbideGrid, 'Text', '-');
-controlUi.CarbidePulseEnergyLabel.Layout.Row = 5; controlUi.CarbidePulseEnergyLabel.Layout.Column = 2;
+controlUi.CarbidePulseEnergyLabel.Layout.Row = 4; controlUi.CarbidePulseEnergyLabel.Layout.Column = 4;
+
+helpers.createRightLabel(carbideGrid, 'Output', 5, 1);
+controlUi.CarbideOutputEnabledLabel = uilabel(carbideGrid, 'Text', '-');
+controlUi.CarbideOutputEnabledLabel.Layout.Row = 5; controlUi.CarbideOutputEnabledLabel.Layout.Column = 2;
+helpers.createRightLabel(carbideGrid, 'Shutter', 5, 3);
+controlUi.CarbideShutterStateLabel = uilabel(carbideGrid, 'Text', '-');
+controlUi.CarbideShutterStateLabel.Layout.Row = 5; controlUi.CarbideShutterStateLabel.Layout.Column = 4;
 
 controlUi.CarbideEnableOutputButton = uibutton(carbideGrid, 'Text', 'Open Laser Shutter', ...
     'ButtonPushedFcn', callbacks.enableCarbideOutput);
@@ -411,6 +433,8 @@ helpers.enableScrolling(exposureGrid);
 helpers.createRightLabel(exposureGrid, 'Exposure (us)', 1, 1);
 controlUi.ExposureTimeField = uieditfield(exposureGrid, 'numeric');
 controlUi.ExposureTimeField.Layout.Row = 1; controlUi.ExposureTimeField.Layout.Column = 2;
+controlUi.ExposureTimeField.Tooltip = ...
+    'Zaber hardware-timed exposure; minimum and resolution are both 100 us in this setup.';
 helpers.createRightLabel(exposureGrid, 'Repeat', 2, 1);
 controlUi.ExposureRepeatField = uieditfield(exposureGrid, 'numeric');
 controlUi.ExposureRepeatField.Layout.Row = 2; controlUi.ExposureRepeatField.Layout.Column = 2;
@@ -423,5 +447,13 @@ controlUi.PreviewPowerField.Layout.Row = 4; controlUi.PreviewPowerField.Layout.C
 controlUi.FireExposureButton = uibutton(exposureGrid, 'Text', 'Fire Exposure', ...
     'ButtonPushedFcn', callbacks.fireExposure);
 controlUi.FireExposureButton.Layout.Row = 5;
-controlUi.FireExposureButton.Layout.Column = [1 2];
+controlUi.FireExposureButton.Layout.Column = 1;
+controlUi.FireExposureButton.Tooltip = ...
+    'Original host-sequenced repeats; useful for comparison and compatibility.';
+controlUi.FireStreamExposureButton = uibutton(exposureGrid, 'Text', 'Fire Stream', ...
+    'ButtonPushedFcn', callbacks.fireStreamExposure);
+controlUi.FireStreamExposureButton.Layout.Row = 5;
+controlUi.FireStreamExposureButton.Layout.Column = 2;
+controlUi.FireStreamExposureButton.Tooltip = ...
+    'Store the complete repeat sequence in the Zaber device before firing.';
 end

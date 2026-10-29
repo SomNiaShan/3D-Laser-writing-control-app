@@ -1,5 +1,26 @@
-function fig = lw_slm_control_app()
+function app = lw_slm_control_app(parent, options)
 %LW_SLM_CONTROL_APP Button-based MATLAB UI for controlling the HOLOEYE SLM.
+%   With no input, opens the standalone figure and returns it. When a parent
+%   UI container is supplied, embeds the controls there and returns a
+%   lifecycle controller whose shutdown closes the SLM. Options for the
+%   embedded case: hostBusyFcn returns true while the host app must keep its
+%   STOP button reachable, and dialogs supplies its alert/confirm functions.
+
+if nargin < 1
+    parent = [];
+end
+if nargin < 2 || isempty(options)
+    options = struct();
+end
+ownsFigure = isempty(parent);
+hostBusyFcn = @() false;
+if isfield(options, 'hostBusyFcn')
+    hostBusyFcn = options.hostBusyFcn;
+end
+dialogs = struct('alert', @uialert, 'confirm', @uiconfirm);
+if isfield(options, 'dialogs')
+    dialogs = options.dialogs;
+end
 
 localAddRepoPaths();
 
@@ -13,24 +34,36 @@ state.embeddedPreviewTimer = [];
 state.embeddedPreviewFile = fullfile(tempdir, 'slm_control_app_sdk_preview.png');
 state.activeGlobalControlIndex = [];
 state.isSyncingAxiconControls = false;
+state.isShutDown = false;
 noPatternListItem = '(no saved patterns)';
 noGlobalAdjustmentListItem = '(no saved adjustments)';
-globalControlRows = struct('label', {}, 'field', {}, 'slider', {}, 'step', {}, 'name', {});
+globalControlRows = struct('label', {}, 'field', {}, 'slider', {}, 'step', {}, 'name', {}, ...
+    'roundValues', {});
 drillDefaults = slm_default_drill_beam_options();
 slmSnapshotAppDataKey = 'LaserWritingCurrentSlmDrillOptions';
+slmSnapshotSource = "laser-writing-embedded-slm";
 
-fig = uifigure( ...
-    'Name', 'SLM MATLAB Control (Laser Writing)', ...
-    'Position', [100 100 1060 720], ...
-    'CloseRequestFcn', @onClose, ...
-    'WindowButtonDownFcn', @onWindowButtonDown, ...
-    'WindowKeyPressFcn', @onWindowKeyPress);
+if ownsFigure
+    fig = uifigure( ...
+        'Name', 'SLM MATLAB Control (Laser Writing)', ...
+        'Position', [100 100 1060 720], ...
+        'CloseRequestFcn', @onClose);
+    rootContainer = fig;
+else
+    rootContainer = parent;
+    fig = ancestor(parent, 'figure');
+end
+% Embedded, these see every click and key press in the host app's figure.
+fig.WindowButtonDownFcn = @onWindowButtonDown;
+fig.WindowKeyPressFcn = @onWindowKeyPress;
 
-main = uigridlayout(fig, [1 2]);
+main = uigridlayout(rootContainer, [1 2]);
 main.ColumnWidth = {420, '1x'};
 main.RowHeight = {'1x'};
 main.Padding = [12 12 12 12];
 main.ColumnSpacing = 12;
+% Release the SLM however this UI goes away, e.g. delete(fig) without close.
+main.DeleteFcn = @(~, ~) shutdownController();
 
 leftTabs = uitabgroup(main);
 leftTabs.Layout.Row = 1;
@@ -164,8 +197,8 @@ globalControlsGrid.RowSpacing = 10;
 
 globalPanel = uipanel(globalControlsGrid, 'Title', 'Global Adjustments');
 globalPanel.Layout.Row = 1;
-globalGrid = uigridlayout(globalPanel, [7 3], 'Scrollable', 'on');
-globalGrid.RowHeight = [repmat({42}, 1, 6), {34}];
+globalGrid = uigridlayout(globalPanel, [9 3], 'Scrollable', 'on');
+globalGrid.RowHeight = [repmat({42}, 1, 8), {34}];
 globalGrid.ColumnWidth = {185, 72, '1x'};
 globalGrid.Padding = [10 8 10 8];
 globalGrid.RowSpacing = 6;
@@ -173,22 +206,29 @@ globalGrid.RowSpacing = 6;
 globalApertureMaxPx = ceil(hypot(state.cfg.expectedWidthPx, state.cfg.expectedHeightPx) / 2);
 globalHalfWidthPx = state.cfg.expectedWidthPx / 2;
 globalHalfHeightPx = state.cfg.expectedHeightPx / 2;
+globalAdjustmentDefaults = defaultGlobalAdjustmentOptions();
 
-[globalLensField, globalLensSlider] = addSliderNumericField(globalGrid, 1, ...
+[globalPatternOffsetXField, globalPatternOffsetXSlider] = addSliderNumericField(globalGrid, 1, ...
+    'Pattern X offset px (+right)', globalAdjustmentDefaults.patternOffsetXpx, [-Inf Inf], ...
+    [-globalHalfWidthPx globalHalfWidthPx], 1, true);
+[globalPatternOffsetYField, globalPatternOffsetYSlider] = addSliderNumericField(globalGrid, 2, ...
+    'Pattern Y offset px (+down)', globalAdjustmentDefaults.patternOffsetYpx, [-Inf Inf], ...
+    [-globalHalfHeightPx globalHalfHeightPx], 1, true);
+[globalLensField, globalLensSlider] = addSliderNumericField(globalGrid, 3, ...
     'Lens focal mm (0 off)', 0, [-Inf Inf], [-1000 1000], 1);
-[globalXShiftField, globalXShiftSlider] = addSliderNumericField(globalGrid, 2, ...
+[globalXShiftField, globalXShiftSlider] = addSliderNumericField(globalGrid, 4, ...
     ['X shift 2' char(960) ' (0 off)'], 0, [-Inf Inf], [-state.cfg.expectedWidthPx state.cfg.expectedWidthPx], 1);
-[globalYShiftField, globalYShiftSlider] = addSliderNumericField(globalGrid, 3, ...
+[globalYShiftField, globalYShiftSlider] = addSliderNumericField(globalGrid, 5, ...
     ['Y shift 2' char(960) ' (0 off)'], 0, [-Inf Inf], [-state.cfg.expectedHeightPx state.cfg.expectedHeightPx], 1);
-[globalApertureRadiusField, globalApertureRadiusSlider] = addSliderNumericField(globalGrid, 4, ...
+[globalApertureRadiusField, globalApertureRadiusSlider] = addSliderNumericField(globalGrid, 6, ...
     'Aperture radius px (0 full)', 0, [0 Inf], [0 globalApertureMaxPx], 1);
-[globalApertureCenterXField, globalApertureCenterXSlider] = addSliderNumericField(globalGrid, 5, ...
+[globalApertureCenterXField, globalApertureCenterXSlider] = addSliderNumericField(globalGrid, 7, ...
     'Aperture X center px', 0, [-Inf Inf], [-globalHalfWidthPx globalHalfWidthPx], 1);
-[globalApertureCenterYField, globalApertureCenterYSlider] = addSliderNumericField(globalGrid, 6, ...
+[globalApertureCenterYField, globalApertureCenterYSlider] = addSliderNumericField(globalGrid, 8, ...
     'Aperture Y center px', 0, [-Inf Inf], [-globalHalfHeightPx globalHalfHeightPx], 1);
 resetGlobalButton = uibutton(globalGrid, 'Text', 'Reset', ...
     'ButtonPushedFcn', @onResetGlobalAdjustments);
-setGridLocation(resetGlobalButton, 7, [1 3]);
+setGridLocation(resetGlobalButton, 9, [1 3]);
 
 globalPresetPanel = uipanel(globalControlsGrid, 'Title', 'Saved Global Adjustments');
 globalPresetPanel.Layout.Row = 2;
@@ -325,6 +365,11 @@ syncAxiconEquivalentControls();
 updateConnectionStatus();
 publishCurrentDrillOptions();
 logMessage('App opened.');
+if ownsFigure
+    app = fig;
+else
+    app = struct('shutdown', @shutdownController);
+end
 
     function field = addNumericField(parent, row, labelText, value, limits, roundValues)
         label = uilabel(parent, 'Text', labelText);
@@ -341,12 +386,15 @@ logMessage('App opened.');
         setGridLocation(field, row, 2);
     end
 
-    function [field, slider] = addSliderNumericField(parent, row, labelText, value, fieldLimits, sliderLimits, step)
+    function [field, slider] = addSliderNumericField(parent, row, labelText, value, fieldLimits, sliderLimits, step, roundValues)
+        if nargin < 8
+            roundValues = false;
+        end
         label = uilabel(parent, 'Text', labelText);
         setGridLocation(label, row, 1);
 
         field = uieditfield(parent, 'numeric', 'Value', value, 'Limits', fieldLimits, ...
-            'RoundFractionalValues', false);
+            'RoundFractionalValues', roundValues);
         setGridLocation(field, row, 2);
 
         slider = uislider(parent, 'Limits', sliderLimits, ...
@@ -355,35 +403,50 @@ logMessage('App opened.');
             'MinorTicks', []);
         setGridLocation(slider, row, 3);
 
-        controlIndex = registerGlobalControl(label, field, slider, step, labelText);
+        controlIndex = registerGlobalControl(label, field, slider, step, labelText, roundValues);
         field.ValueChangedFcn = @(~, ~) onGlobalFieldChanged(field, slider, controlIndex);
         slider.ValueChangingFcn = @(~, event) onGlobalSliderChanging(event, field, controlIndex);
         slider.ValueChangedFcn = @(~, ~) onGlobalSliderChanged(slider, field, controlIndex);
     end
 
-    function controlIndex = registerGlobalControl(label, field, slider, step, name)
+    function controlIndex = registerGlobalControl(label, field, slider, step, name, roundValues)
         controlIndex = numel(globalControlRows) + 1;
         globalControlRows(controlIndex).label = label;
         globalControlRows(controlIndex).field = field;
         globalControlRows(controlIndex).slider = slider;
         globalControlRows(controlIndex).step = step;
         globalControlRows(controlIndex).name = name;
+        globalControlRows(controlIndex).roundValues = roundValues;
+    end
+
+    function value = globalControlValue(controlIndex, value)
+        if globalControlRows(controlIndex).roundValues
+            value = round(value);
+        end
     end
 
     function onGlobalFieldChanged(field, slider, controlIndex)
-        setActiveGlobalControl(controlIndex);
+        % A typed value also commits when the user clicks elsewhere; only a
+        % commit made from this row (Enter, or a click on it) arms its arrow keys.
+        if isequal(globalControlIndexFromObject(fig.CurrentObject), controlIndex)
+            setActiveGlobalControl(controlIndex);
+        else
+            clearActiveGlobalControl();
+        end
         slider.Value = clampSliderValue(field.Value, slider.Limits);
         onGlobalAdjustmentChanged([], []);
     end
 
     function onGlobalSliderChanging(event, field, controlIndex)
         setActiveGlobalControl(controlIndex);
-        field.Value = event.Value;
+        field.Value = globalControlValue(controlIndex, event.Value);
     end
 
     function onGlobalSliderChanged(slider, field, controlIndex)
         setActiveGlobalControl(controlIndex);
-        field.Value = slider.Value;
+        value = globalControlValue(controlIndex, slider.Value);
+        slider.Value = value;
+        field.Value = value;
         onGlobalAdjustmentChanged([], []);
     end
 
@@ -391,11 +454,14 @@ logMessage('App opened.');
         controlIndex = globalControlIndexFromObject(fig.CurrentObject);
         if ~isempty(controlIndex)
             setActiveGlobalControl(controlIndex);
+        elseif ~isempty(state.activeGlobalControlIndex)
+            % Arrow keys move the SLM pattern, so a click anywhere else disarms them.
+            clearActiveGlobalControl();
         end
     end
 
     function onWindowKeyPress(~, event)
-        if ~isequal(leftTabs.SelectedTab, globalTab)
+        if ~isTabShown(globalTab)
             return;
         end
         switch lower(event.Key)
@@ -406,6 +472,15 @@ logMessage('App opened.');
         end
     end
 
+    function tf = isTabShown(tab)
+        % Embedded, the host app's other tabs share this figure's key presses.
+        tf = true;
+        while tf && ~isempty(tab)
+            tf = isequal(tab.Parent.SelectedTab, tab);
+            tab = ancestor(tab.Parent, 'uitab');
+        end
+    end
+
     function adjustActiveGlobalControl(direction, multiplier)
         controlIndex = state.activeGlobalControlIndex;
         if isempty(controlIndex) || controlIndex < 1 || controlIndex > numel(globalControlRows)
@@ -413,7 +488,11 @@ logMessage('App opened.');
         end
 
         control = globalControlRows(controlIndex);
-        nextValue = control.field.Value + direction * control.step * multiplier;
+        stepSize = control.step * multiplier;
+        if control.roundValues
+            stepSize = max(1, round(stepSize));
+        end
+        nextValue = globalControlValue(controlIndex, control.field.Value + direction * stepSize);
         nextValue = clampSliderValue(nextValue, control.slider.Limits);
         control.field.Value = nextValue;
         control.slider.Value = nextValue;
@@ -678,6 +757,9 @@ logMessage('App opened.');
     end
 
     function onToggleConnection(~, ~)
+        if ~strcmp(connectButton.Enable, 'on')
+            return;
+        end
         if isempty(state.ctx)
             onConnect([], []);
         else
@@ -686,19 +768,50 @@ logMessage('App opened.');
     end
 
     function onConnect(~, ~)
+        if ~strcmp(connectButton.Enable, 'on')
+            return;
+        end
+        connectButton.Enable = 'off';
+        connectionCleanup = onCleanup(@() restoreConnectButton(connectButton));
         try
             if isempty(state.ctx)
+                logMessage('Connecting SLM...');
+                if ~isAlive()
+                    return;
+                end
                 state.ctx = slm_init(state.cfg);
+                if ~isAlive()
+                    slm_close(state.ctx);
+                    state.ctx = [];
+                    return;
+                end
                 logMessage(sprintf('Connected SLM: %d x %d px, wavelength %.1f nm.', ...
                     state.ctx.widthPx, state.ctx.heightPx, state.ctx.config.wavelengthNm));
+                if ~isAlive()
+                    return;
+                end
+                if isfield(state.ctx, 'previewWarning') && ~isempty(state.ctx.previewWarning)
+                    logMessage(['WARNING: ', state.ctx.previewWarning]);
+                end
             else
                 logMessage('SLM is already connected.');
             end
-            updateConnectionStatus();
-            publishCurrentDrillOptions();
+            if isAlive()
+                updateConnectionStatus();
+                publishCurrentDrillOptions();
+            end
         catch err
-            showError(err);
+            if isAlive()
+                showError(err);
+            else
+                fprintf(2, '%s\n', getReport(err, 'extended', 'hyperlinks', 'off'));
+            end
         end
+    end
+
+    function tf = isAlive()
+        % Embedded, fig is the host figure and outlives shutdownController.
+        tf = ~state.isShutDown && isvalid(fig);
     end
 
     function onDisconnect(~, ~)
@@ -871,7 +984,7 @@ logMessage('App opened.');
     function onDeleteSelectedPattern(~, ~)
         try
             patternName = selectedPatternName(true);
-            choice = uiconfirm(fig, sprintf('Delete saved pattern "%s"?', patternName), ...
+            choice = confirmAction(sprintf('Delete saved pattern "%s"?', patternName), ...
                 'Delete Saved Pattern', ...
                 'Options', {'Delete', 'Cancel'}, ...
                 'DefaultOption', 2, ...
@@ -1025,7 +1138,7 @@ logMessage('App opened.');
             else
                 confirmMessage = sprintf('Save global adjustment "%s"?', savedName);
             end
-            choice = uiconfirm(fig, confirmMessage, ...
+            choice = confirmAction(confirmMessage, ...
                 'Save Global Adjustment', ...
                 'Options', {'Save', 'Cancel'}, ...
                 'DefaultOption', 2, ...
@@ -1059,7 +1172,7 @@ logMessage('App opened.');
     function onDeleteSelectedGlobalAdjustment(~, ~)
         try
             adjustmentName = selectedGlobalAdjustmentName(true);
-            choice = uiconfirm(fig, sprintf('Delete saved global adjustment "%s"?', adjustmentName), ...
+            choice = confirmAction(sprintf('Delete saved global adjustment "%s"?', adjustmentName), ...
                 'Delete Global Adjustment', ...
                 'Options', {'Delete', 'Cancel'}, ...
                 'DefaultOption', 2, ...
@@ -1149,6 +1262,10 @@ logMessage('App opened.');
             numericGlobalAdjustmentOption(options, 'apertureCenterXpx', defaults.apertureCenterXpx));
         setGlobalAdjustmentValue(globalApertureCenterYField, globalApertureCenterYSlider, ...
             numericGlobalAdjustmentOption(options, 'apertureCenterYpx', defaults.apertureCenterYpx));
+        setGlobalAdjustmentValue(globalPatternOffsetXField, globalPatternOffsetXSlider, ...
+            patternOffsetOption(options, 'patternOffsetXpx', defaults.patternOffsetXpx));
+        setGlobalAdjustmentValue(globalPatternOffsetYField, globalPatternOffsetYSlider, ...
+            patternOffsetOption(options, 'patternOffsetYpx', defaults.patternOffsetYpx));
 
         clearActiveGlobalControl();
     end
@@ -1161,6 +1278,8 @@ logMessage('App opened.');
         options.apertureRadiusPx = Inf;
         options.apertureCenterXpx = 0;
         options.apertureCenterYpx = 0;
+        options.patternOffsetXpx = patternOffsetOption(state.cfg, 'patternOffsetXpx', 0);
+        options.patternOffsetYpx = patternOffsetOption(state.cfg, 'patternOffsetYpx', 0);
     end
 
     function value = numericGlobalAdjustmentOption(options, fieldName, defaultValue)
@@ -1170,6 +1289,14 @@ logMessage('App opened.');
                 ~isnan(options.(fieldName))
             value = double(options.(fieldName));
         end
+    end
+
+    function value = patternOffsetOption(options, fieldName, defaultValue)
+        value = numericGlobalAdjustmentOption(options, fieldName, defaultValue);
+        if ~isfinite(value)
+            value = defaultValue;
+        end
+        value = round(value);
     end
 
     function setGlobalAdjustmentValue(field, slider, value)
@@ -1208,7 +1335,7 @@ logMessage('App opened.');
 
     function onResetGlobalAdjustments(~, ~)
         try
-            choice = uiconfirm(fig, 'Reset all global adjustments to defaults?', ...
+            choice = confirmAction('Reset all global adjustments to defaults?', ...
                 'Reset Global Adjustments', ...
                 'Options', {'Reset', 'Cancel'}, ...
                 'DefaultOption', 2, ...
@@ -1271,12 +1398,23 @@ logMessage('App opened.');
         end
         options.apertureCenterXpx = globalApertureCenterXField.Value;
         options.apertureCenterYpx = globalApertureCenterYField.Value;
+        options.patternOffsetXpx = globalPatternOffsetXField.Value;
+        options.patternOffsetYpx = globalPatternOffsetYField.Value;
     end
 
     function publishCurrentDrillOptions()
+        if state.isShutDown
+            return;
+        end
+        if ~ownsFigure && (isempty(state.ctx) || strcmp(state.currentOnSlm, 'none'))
+            % The tab never closes, so it only describes the SLM while it is
+            % driving it; 3D imaging names and metadata.csv use this snapshot.
+            removeOwnSnapshot();
+            return;
+        end
         try
             snapshot = struct();
-            snapshot.source = "laser-writing-embedded-slm";
+            snapshot.source = slmSnapshotSource;
             snapshot.updatedAt = string(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
             snapshot.isOpen = isvalid(fig);
             snapshot.isConnected = ~isempty(state.ctx);
@@ -1294,6 +1432,20 @@ logMessage('App opened.');
                 snapshot.currentAdjustedPatternName = "";
             end
             setappdata(0, slmSnapshotAppDataKey, snapshot);
+        catch
+        end
+    end
+
+    function removeOwnSnapshot()
+        % A batch row's snapshot describes the batch SLM; leave it in place.
+        try
+            if isappdata(0, slmSnapshotAppDataKey)
+                snapshot = getappdata(0, slmSnapshotAppDataKey);
+                if isstruct(snapshot) && isfield(snapshot, 'source') && ...
+                        string(snapshot.source) == slmSnapshotSource
+                    rmappdata(0, slmSnapshotAppDataKey);
+                end
+            end
         catch
         end
     end
@@ -1410,6 +1562,9 @@ logMessage('App opened.');
             phase(~apertureMask) = 0;
         end
 
+        % Last, so the lens and aperture move with the pattern as one piece.
+        phase = slm_translate_phase(phase, globalOptions.patternOffsetXpx, globalOptions.patternOffsetYpx);
+
         baseName = patternDisplayName(pattern);
         adjustedPattern = pattern;
         adjustedPattern.name = [baseName, ' + global'];
@@ -1514,10 +1669,34 @@ logMessage('App opened.');
 
     function showError(err)
         logMessage(sprintf('ERROR: %s', err.message));
-        uialert(fig, err.message, 'SLM Control Error');
+        fprintf(2, '%s\n', getReport(err, 'extended', 'hyperlinks', 'off'));
+        % Embedded, a modal alert would cover the host app's STOP button.
+        dialogs.alert(fig, err.message, 'SLM Control Error', 'Modal', ownsFigure);
+    end
+
+    function choice = confirmAction(message, titleText, varargin)
+        % A confirm is modal and blocks until answered, so embedded it would
+        % hide the host app's STOP button while hardware is active.
+        if state.isShutDown
+            error('SLM:ShutDown', 'SLM control is closing.');
+        end
+        if hostBusyFcn()
+            error('SLM:HostBusy', ['Wait until no run, exposure, pause, stage move, or ' ...
+                'laser output is active (or press STOP), then try again.']);
+        end
+        choice = dialogs.confirm(fig, message, titleText, varargin{:});
     end
 
     function onClose(~, ~)
+        shutdownController();
+        delete(fig);
+    end
+
+    function shutdownController()
+        if state.isShutDown
+            return;
+        end
+        state.isShutDown = true;
         try
             rmappdata(0, slmSnapshotAppDataKey);
         catch
@@ -1525,7 +1704,9 @@ logMessage('App opened.');
         try
             stopEmbeddedPreview(false);
             if ~isempty(state.ctx)
-                slm_close(state.ctx);
+                ctx = state.ctx;
+                state.ctx = [];
+                slm_close(ctx);
             end
         catch
         end
@@ -1535,8 +1716,13 @@ logMessage('App opened.');
             end
         catch
         end
-        delete(fig);
     end
+end
+
+function restoreConnectButton(button)
+if isvalid(button)
+    button.Enable = 'on';
+end
 end
 
 function localAddRepoPaths()

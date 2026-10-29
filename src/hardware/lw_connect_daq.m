@@ -5,4 +5,5 @@ state.daq = daq(config.daq.vendor);
 addoutput(state.daq, config.daq.device, config.daq.powerChannel, "Voltage");
 state.daq.Rate = config.daq.rate;
 write(state.daq, 0);
+state.laserPowerPercent = 0;
 end

@@ -10,6 +10,12 @@ end
 if ~isfield(options, 'exposureTimeSeconds')
     options.exposureTimeSeconds = config.execution.pointExposureTime;
 end
+if ~isfield(options, 'moveFcn') || isempty(options.moveFcn)
+    options.moveFcn = @lw_move_absolute;
+end
+if ~isfield(options, 'exposureFcn') || isempty(options.exposureFcn)
+    options.exposureFcn = @lw_manual_exposure;
+end
 if ~isfield(options, 'motion')
     options.motion = struct( ...
         'velocity', config.motion.defaultVelocity, ...
@@ -34,6 +40,8 @@ if ~isfield(options, 'startIndex') || isempty(options.startIndex)
     options.startIndex = 1;
 end
 
+[trajectory, ~] = lw_prepare_point_run_trajectory( ...
+    trajectory, options.exposureTimeSeconds, options.pauseSeconds, config);
 pointCount = numel(trajectory.x);
 startIndex = max(1, min(round(double(options.startIndex)), pointCount + 1));
 result = localRunResult("finished", pointCount + 1, localEmptyTarget(), pointCount);
@@ -60,15 +68,39 @@ for i = startIndex:pointCount
         'shouldStopFcn', options.shouldStopFcn, ...
         'yieldFcn', options.yieldFcn, ...
         'pollIntervalSeconds', 0.1);
-    [state, wasStopped] = lw_move_absolute(state, target, options.motion, moveOptions);
+    [state, wasStopped] = options.moveFcn(state, target, options.motion, moveOptions);
     if wasStopped
         result = localRunResult("stopped", i, localCurrentPositionTarget(state), i - 1);
         break;
     end
 
+    options.yieldFcn();
+    if options.shouldStopFcn()
+        result = localRunResult("stopped", i, target, i - 1);
+        break;
+    end
+    if options.pauseRequestedFcn()
+        result = localRunResult("paused", i, target, i - 1);
+        break;
+    end
+
+    settleSeconds = trajectory.preWritePauseSeconds(i);
+    if settleSeconds > 0
+        invokeProgressFcn(options.progressFcn, i, pointCount, target, "Settling");
+        [wasStopped, wasPaused] = localPauseWithCallbacks(settleSeconds, options);
+        if wasStopped
+            result = localRunResult("stopped", i, target, i - 1);
+            break;
+        end
+        if wasPaused
+            result = localRunResult("paused", i, target, i - 1);
+            break;
+        end
+    end
+
     invokeProgressFcn(options.progressFcn, i, pointCount, target, "Exposing");
-    wasStopped = lw_manual_exposure(state, config, trajectory.power(i), ...
-        options.exposureTimeSeconds, options.laserStateFcn, ...
+    wasStopped = options.exposureFcn(state, config, trajectory.power(i), ...
+        trajectory.dwellSeconds(i), options.laserStateFcn, ...
         options.shouldStopFcn, options.yieldFcn);
     if wasStopped
         result = localRunResult("stopped", i, target, i - 1);
@@ -87,17 +119,6 @@ for i = startIndex:pointCount
         break;
     end
 
-    if i < pointCount
-        [wasStopped, wasPaused] = localPauseWithCallbacks(options.pauseSeconds, options);
-        if wasStopped
-            result = localRunResult("stopped", i + 1, target, i);
-            break;
-        end
-        if wasPaused
-            result = localRunResult("paused", i + 1, target, i);
-            break;
-        end
-    end
 end
 end
 
@@ -131,7 +152,8 @@ while toc(timerStart) < seconds
         wasPaused = true;
         return;
     end
-    pause(0.02);
+    remainingSeconds = seconds - toc(timerStart);
+    pause(max(min(remainingSeconds, 0.02), 0));
 end
 end
 

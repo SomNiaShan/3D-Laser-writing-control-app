@@ -11,8 +11,19 @@ config.stage.deviceOrder = struct('x', 1, 'y', 3, 'z', 2);
 config.stage.axisMap = struct('x', 1, 'y', 1, 'z', 1);
 config.stage.pulseTriggerAxis = 'x';
 config.stage.pulseTriggerChannel = 1;
-config.stage.ttlGateWidthUs = 50;
-config.stage.maxPulseTriggerRateHz = 1e3;
+% High enables PP_EN; low disables it. CARBIDE External Control must also
+% use Active high. Its internal pull-up can enable PP_EN on a disconnected
+% input, so software OFF is not a substitute for the hardware interlock.
+config.stage.pulseTriggerActiveHigh = true;
+% Zaber ASCII scheduled digital outputs use 0.1 ms units (firmware 7.37+).
+config.stage.digitalOutputScheduleMinUs = 100;
+config.stage.digitalOutputScheduleResolutionUs = 100;
+% Manual Exposure stores the complete repeat sequence in one device-side
+% stream. Zaber stream waits are integer milliseconds, so the requested
+% exposure-plus-interval cycle must land exactly on this grid.
+config.stage.manualExposureStreamId = 1;
+config.stage.manualExposureBufferId = 1;
+config.stage.streamWaitResolutionUs = 1000;
 
 config.daq = struct();
 config.daq.vendor = "ni";
@@ -44,10 +55,11 @@ config.motion.travelLimits = struct( ...
     'z', [0, 150]);
 
 config.execution = struct();
+% Fallback pre-write settle for plans without per-row pause_s values.
 config.execution.pointPause = 0.1;
-% Internal duration unit is seconds; the app UI displays this in us.
-config.execution.pointExposureTime = 1e-6;
-config.execution.streamTargetSpeed = 1.0;
+% Fallback dwell for plans without per-row dwell_s; UI displays microseconds.
+config.execution.pointExposureTime = 100e-6;
+config.execution.defaultZSweepSpeed = 1.0;
 config.execution.zSweepRecoveryAttempts = 3;
 
 config.logging = struct();
@@ -63,6 +75,10 @@ config.imaging.autoExposureEnabled = true;
 config.imaging.autoExposureSampleCount = 5;
 config.imaging.autoExposureSafetyFactor = 0.8;
 config.imaging.captureTimeoutMs = 1500;
+% Used until an ROI is applied in the app; afterwards the saved ROI file wins.
 config.imaging.captureRegion = "top-left-quarter";
+% Initial Custom ROI fields, in full-sensor pixels.
+config.imaging.defaultCustomRoi = struct('OffsetX', 0, 'OffsetY', 0, 'Width', 512, 'Height', 512);
+config.imaging.roiSettingsFile = fullfile(fileparts(fileparts(mfilename('fullpath'))), 'outputs', 'settings', 'flir_roi.json');
 config.imaging.outputFolder = fullfile(fileparts(fileparts(mfilename('fullpath'))), 'outputs', '3d_imaging');
 end

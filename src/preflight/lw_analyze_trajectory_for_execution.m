@@ -10,11 +10,11 @@ yStageValues = traj.y(:);
 zValues = traj.z(:);
 operationCount = numel(xValues);
 
-if isfield(traj, 'cutPlan') && istable(traj.cutPlan)
-    [cutX, cutY, cutZ] = localCutPlanBoundsValues(traj.cutPlan);
-    xValues = [xValues; cutX];
-    yStageValues = [yStageValues; cutY];
-    zValues = [zValues; cutZ];
+if isfield(traj, 'writingPlan') && istable(traj.writingPlan)
+    [pathX, pathY, pathZ] = localPathEndValues(traj.writingPlan);
+    xValues = [xValues; pathX];
+    yStageValues = [yStageValues; pathY];
+    zValues = [zValues; pathZ];
 end
 
 yDisplayValues = yDisplayReference - yStageValues;
@@ -72,26 +72,18 @@ if ~isempty(idx)
 end
 end
 
-function [xValues, yValues, zValues] = localCutPlanBoundsValues(cutPlan)
-xValues = [];
-yValues = [];
-zValues = [];
-coordinateSets = { ...
-    {'x2', 'y2', 'z2'}, ...
-    {'leadX', 'leadY', 'leadZ'}, ...
-    {'exitX', 'exitY', 'exitZ'}};
-
-for i = 1:numel(coordinateSets)
-    names = coordinateSets{i};
-    if all(ismember(names, cutPlan.Properties.VariableNames))
-        xValues = [xValues; cutPlan.(names{1})(:)]; %#ok<AGROW>
-        yValues = [yValues; cutPlan.(names{2})(:)]; %#ok<AGROW>
-        zValues = [zValues; cutPlan.(names{3})(:)]; %#ok<AGROW>
-    end
+function [xValues, yValues, zValues] = localPathEndValues(writingPlan)
+requiredNames = {'operation', 'x2', 'y2', 'z2'};
+if ~all(ismember(requiredNames, writingPlan.Properties.VariableNames))
+    xValues = [];
+    yValues = [];
+    zValues = [];
+    return;
 end
-
-finiteMask = isfinite(xValues) & isfinite(yValues) & isfinite(zValues);
-xValues = xValues(finiteMask);
-yValues = yValues(finiteMask);
-zValues = zValues(finiteMask);
+pathRows = string(writingPlan.operation) == "path";
+finiteRows = pathRows & isfinite(writingPlan.x2) & ...
+    isfinite(writingPlan.y2) & isfinite(writingPlan.z2);
+xValues = writingPlan.x2(finiteRows);
+yValues = writingPlan.y2(finiteRows);
+zValues = writingPlan.z2(finiteRows);
 end

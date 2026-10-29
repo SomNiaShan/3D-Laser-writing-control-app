@@ -25,6 +25,10 @@ classdef StageLaserController < handle
 
         function connectStagesImpl(obj)
             obj.Model.State = obj.Model.Services.stage.connect(obj.Model.State, obj.Model.Config);
+            % Establish the configured inactive level before reporting ready.
+            % Let a failed write abort connection setup instead of hiding it.
+            obj.Model.Services.stage.setPulseTrigger(obj.Model.State, false, obj.Model.Config);
+            obj.setLaserState(false);
             obj.Ports.logMessage(sprintf('Stages connected on %s.', obj.Model.Config.stage.comPort));
             obj.tryRefreshPosition(false);
             obj.startPositionTimer();
@@ -201,6 +205,7 @@ classdef StageLaserController < handle
             obj.Model.Ui.StartXField.Value = obj.Model.State.currentPosition.x;
             obj.Model.Ui.StartYField.Value = obj.Ports.stageYToDisplay(obj.Model.State.currentPosition.y);
             obj.Model.Ui.StartZField.Value = obj.Model.State.currentPosition.z;
+            obj.markPreparedPlanDirtyAfterPositionCopy();
             obj.Ports.logMessage('Current position copied into target and origin fields.');
         end
 
@@ -302,6 +307,7 @@ classdef StageLaserController < handle
             obj.Model.Ui.ZSweepYField.Value = obj.Ports.stageYToDisplay(obj.Model.State.currentPosition.y);
             obj.Model.Ui.ZSweepBackField.Value = obj.Model.State.currentPosition.z;
             obj.Model.Ui.ZSweepFrontField.Value = obj.Model.State.currentPosition.z;
+            obj.markPreparedPlanDirtyAfterPositionCopy();
             obj.Ports.logMessage(sprintf('Current position copied into Z Sweep: X %.3f, Y %.3f, Z %.3f mm.', ...
                 obj.Model.State.currentPosition.x, obj.Ports.stageYToDisplay(obj.Model.State.currentPosition.y), obj.Model.State.currentPosition.z));
         end
@@ -353,6 +359,8 @@ classdef StageLaserController < handle
         end
 
         function didBegin = beginPausedManualStageOperation(obj)
+            % Set for every manual move, paused or not; the SLM tab waits on it.
+            obj.Model.ManualStageMoveActive = true;
             didBegin = obj.Model.State.isPaused && ~obj.Model.State.isBusy && ~obj.Model.PausedManualMotionActive;
             if ~didBegin
                 return;
@@ -363,6 +371,7 @@ classdef StageLaserController < handle
         end
 
         function finishPausedManualStageOperation(obj, didBegin)
+            obj.Model.ManualStageMoveActive = false;
             if ~didBegin
                 return;
             end
@@ -395,10 +404,19 @@ classdef StageLaserController < handle
 
         function laserOnImpl(obj)
             obj.requireLaserReady();
-            powerPercent = obj.Model.Ui.LaserPowerField.Value;
-            obj.Model.Services.laser.setPower(obj.Model.State, powerPercent);
             obj.Model.Services.stage.setPulseTrigger(obj.Model.State, true, obj.Model.Config);
             obj.setLaserState(true);
+        end
+
+        function onApplyManualPower(obj, ~, ~)
+            obj.Ports.runUiAction(@() obj.applyManualPowerImpl(), 'Failed to apply manual laser power');
+        end
+
+        function applyManualPowerImpl(obj)
+            obj.requireLaserReady();
+            powerPercent = obj.Model.Ui.LaserPowerField.Value;
+            obj.Model.Services.laser.setPower(obj.Model.State, powerPercent);
+            obj.Model.State.laserPowerPercent = powerPercent;
         end
 
         function onLaserOff(obj, ~, ~)
@@ -406,7 +424,9 @@ classdef StageLaserController < handle
         end
 
         function laserOffImpl(obj)
-            obj.forceLaserSafeOff();
+            obj.requireLaserReady();
+            obj.Model.Services.stage.setPulseTrigger(obj.Model.State, false, obj.Model.Config);
+            obj.setLaserState(false);
         end
 
         function onFireExposure(obj, ~, ~)
@@ -416,15 +436,27 @@ classdef StageLaserController < handle
             obj.Ports.runUiAction(@() obj.fireExposureImpl(), 'Failed during manual exposure');
         end
 
+        function onFireStreamExposure(obj, ~, ~)
+            if obj.Model.State.isBusy || obj.Model.State.isPaused
+                return;
+            end
+            obj.Ports.runUiAction(@() obj.fireStreamExposureImpl(), ...
+                'Failed during stream manual exposure');
+        end
+
         function fireExposureImpl(obj)
             obj.requireLaserReady();
-            exposureSeconds = positiveDurationMicroseconds(obj.Model.Ui.ExposureTimeField.Value, 'Exposure time');
+            exposureMicroseconds = lw_validate_stage_schedule_duration_us( ...
+                positiveScalar(obj.Model.Ui.ExposureTimeField.Value, 'Exposure time'), ...
+                obj.Model.Config, 'Manual exposure duration', false);
+            exposureSeconds = exposureMicroseconds .* 1e-6;
             repeatCount = positiveInteger(obj.Model.Ui.ExposureRepeatField.Value, 'Repeat count');
             intervalSeconds = nonnegativeScalar(obj.Model.Ui.ExposureIntervalField.Value, 'Interval');
             powerPercent = obj.Model.Ui.PreviewPowerField.Value;
 
             obj.Model.State.stopRequested = false;
             obj.Model.State.isBusy = true;
+            obj.Model.State.laserPowerPercent = powerPercent;
             obj.Model.RunProgressText = sprintf('0 / %d', repeatCount);
             obj.Model.RunCurrentText = "Manual exposure";
             obj.Ports.logMessage(sprintf('Manual exposure started: %d repeats.', repeatCount));
@@ -465,6 +497,64 @@ classdef StageLaserController < handle
             obj.finishManualBusy();
         end
 
+        function fireStreamExposureImpl(obj)
+            obj.requireLaserReady();
+            exposureMicroseconds = lw_validate_stage_schedule_duration_us( ...
+                positiveScalar(obj.Model.Ui.ExposureTimeField.Value, 'Exposure time'), ...
+                obj.Model.Config, 'Manual exposure duration', false);
+            exposureSeconds = exposureMicroseconds .* 1e-6;
+            repeatCount = positiveInteger(obj.Model.Ui.ExposureRepeatField.Value, 'Repeat count');
+            intervalSeconds = nonnegativeScalar(obj.Model.Ui.ExposureIntervalField.Value, 'Interval');
+            powerPercent = obj.Model.Ui.PreviewPowerField.Value;
+
+            % Validate representability before entering the busy state or
+            % touching hardware. Stream timing is never rounded silently.
+            lw_manual_exposure_stream_plan( ...
+                exposureSeconds, repeatCount, intervalSeconds, obj.Model.Config);
+
+            obj.Model.State.stopRequested = false;
+            obj.Model.State.isBusy = true;
+            obj.Model.State.laserPowerPercent = powerPercent;
+            obj.Model.RunProgressText = sprintf('0 / %d', repeatCount);
+            obj.Model.RunCurrentText = "Manual stream exposure";
+            obj.Ports.logMessage(sprintf( ...
+                'Manual stream exposure started: %d repeats.', repeatCount));
+            obj.Ports.syncAll();
+
+            try
+                [wasStopped, completedCount] = ...
+                    obj.Model.Services.laser.manualExposureSequence( ...
+                    obj.Model.State, obj.Model.Config, powerPercent, ...
+                    exposureSeconds, repeatCount, intervalSeconds, ...
+                    @obj.setLaserState, ...
+                    @(completed) obj.updateManualExposureProgress(completed, repeatCount), ...
+                    @obj.isStopRequested, @obj.yieldWithLivePosition);
+                obj.updateManualExposureProgress(completedCount, repeatCount);
+
+                if wasStopped || obj.Model.State.stopRequested
+                    obj.Ports.logMessage('Manual stream exposure stopped by user.');
+                else
+                    obj.Ports.logMessage('Manual stream exposure finished.');
+                end
+            catch ME
+                obj.finishManualBusy();
+                rethrow(ME);
+            end
+
+            obj.finishManualBusy();
+        end
+
+        function updateManualExposureProgress(obj, completedCount, repeatCount)
+            completedCount = max(0, min(round(double(completedCount)), repeatCount));
+            obj.Model.RunProgressText = sprintf('%d / %d', completedCount, repeatCount);
+            if completedCount == 0
+                obj.Model.RunCurrentText = "Manual stream exposure";
+            else
+                obj.Model.RunCurrentText = sprintf('Exposure %d', completedCount);
+            end
+            obj.Ports.syncRunStatus();
+        end
+
         function finishManualBusy(obj)
             obj.forceLaserSafeOff();
             obj.Model.State.isBusy = false;
@@ -483,7 +573,7 @@ classdef StageLaserController < handle
             velocityFields = [ ...
                 obj.Model.Ui.ManualVelXField, obj.Model.Ui.ManualVelYField, obj.Model.Ui.ManualVelZField, ...
                 obj.Model.Ui.AbsoluteVelXField, obj.Model.Ui.AbsoluteVelYField, obj.Model.Ui.AbsoluteVelZField, ...
-                obj.Model.Ui.StreamSpeedField, obj.Model.Ui.ZSweepSpeedField, obj.Model.Ui.ZSweepReturnSpeedField];
+                obj.Model.Ui.ZSweepSpeedField, obj.Model.Ui.ZSweepReturnSpeedField];
             accelerationFields = [ ...
                 obj.Model.Ui.ManualAccXField, obj.Model.Ui.ManualAccYField, obj.Model.Ui.ManualAccZField, ...
                 obj.Model.Ui.AbsoluteAccXField, obj.Model.Ui.AbsoluteAccYField, obj.Model.Ui.AbsoluteAccZField];
@@ -502,6 +592,16 @@ classdef StageLaserController < handle
         function ensureCurrentPosition(obj)
             obj.Model.State.currentPosition = obj.Model.Services.stage.getPosition(obj.Model.State);
             obj.Model.LastPositionRefreshTic = obj.Model.Services.clock.tic();
+        end
+
+        function markPreparedPlanDirtyAfterPositionCopy(obj)
+            if isempty(obj.Model.PreparedPlan)
+                return;
+            end
+            obj.Model.TrajectoryInputsDirty = true;
+            obj.Model.RunCurrentText = ...
+                "Plan position inputs changed - prepare again";
+            obj.Ports.syncAll();
         end
 
         function setLaserState(obj, isOn)
@@ -631,8 +731,10 @@ classdef StageLaserController < handle
             try
                 if obj.areDAQConnected()
                     obj.Model.Services.daq.write(obj.Model.State.daq, 0);
+                    obj.Model.State.laserPowerPercent = 0;
                 end
             catch
+                obj.Model.State.laserPowerPercent = NaN;
             end
         end
 

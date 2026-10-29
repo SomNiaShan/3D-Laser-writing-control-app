@@ -14,23 +14,23 @@ referenceZ = plane.a * referenceXY(1) + plane.b * referenceXY(2) + plane.c;
 compensation = plane.a * trajectory.x + plane.b * trajectory.y + plane.c - referenceZ;
 trajectory.z = trajectory.z + compensation;
 
-if isfield(trajectory, 'cutPlan') && istable(trajectory.cutPlan)
-    trajectory.cutPlan = localCompensateCutPlan(trajectory.cutPlan, plane, referenceZ);
+if isfield(trajectory, 'writingPlan') && istable(trajectory.writingPlan)
+    trajectory.writingPlan = localCompensateWritingPlan( ...
+        trajectory.writingPlan, plane, referenceZ);
 end
 end
 
-function cutPlan = localCompensateCutPlan(cutPlan, plane, referenceZ)
+function writingPlan = localCompensateWritingPlan(writingPlan, plane, referenceZ)
 coordinateSets = { ...
     {'x', 'y', 'z'}, ...
-    {'x2', 'y2', 'z2'}, ...
-    {'leadX', 'leadY', 'leadZ'}, ...
-    {'exitX', 'exitY', 'exitZ'}};
+    {'x2', 'y2', 'z2'}};
 
 for i = 1:numel(coordinateSets)
     names = coordinateSets{i};
-    if all(ismember(names, cutPlan.Properties.VariableNames))
-        compensation = plane.a * cutPlan.(names{1}) + plane.b * cutPlan.(names{2}) + plane.c - referenceZ;
-        cutPlan.(names{3}) = cutPlan.(names{3}) + compensation;
+    if all(ismember(names, writingPlan.Properties.VariableNames))
+        compensation = plane.a * writingPlan.(names{1}) + ...
+            plane.b * writingPlan.(names{2}) + plane.c - referenceZ;
+        writingPlan.(names{3}) = writingPlan.(names{3}) + compensation;
     end
 end
 end

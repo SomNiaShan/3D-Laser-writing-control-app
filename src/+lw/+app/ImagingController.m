@@ -222,6 +222,7 @@ classdef ImagingController < handle
             preflight.captureTimeoutMs = positiveInteger(obj.Model.Ui.ImagingTimeoutField.Value, '3D imaging capture timeout');
             preflight.exposureUs = positiveScalar(obj.Model.Ui.FlirExposureField.Value, 'FLIR exposure');
             preflight.gain = nonnegativeScalar(obj.Model.Ui.FlirGainField.Value, 'FLIR gain');
+            preflight.flirRoiText = obj.Ports.flir.flirRoiPreflightText();
             preflight.autoExposure = obj.imagingAutoExposureOptionsFromUi('3D imaging');
             preflight.zPositions = imagingZPositions(preflight.zStart, preflight.zEnd, preflight.zStep);
             preflight.userPrefix = sanitizeFileComponent(obj.Model.Ui.ImagingPrefixField.Value, 'beam_stack');
@@ -258,32 +259,26 @@ classdef ImagingController < handle
                     sprintf('%s auto exposure Z samples', label));
             end
             if obj.Ports.flir.hasValidUiControl('ImagingAutoExposureSafetyFactorField')
-                options.safetyFactor = finiteScalar( ...
-                    obj.Model.Ui.ImagingAutoExposureSafetyFactorField.Value, ...
-                    sprintf('%s auto exposure safety factor', label));
+                options.safetyFactor = obj.Model.Ui.ImagingAutoExposureSafetyFactorField.Value;
             end
-            options.safetyFactor = double(options.safetyFactor);
-            if ~isscalar(options.safetyFactor) || ~isfinite(options.safetyFactor) || ...
-                    options.safetyFactor <= 0 || options.safetyFactor >= 1
-                error('%s auto exposure safety factor must be between 0 and 1.', label);
-            end
+            options.safetyFactor = lw_validate_auto_exposure_safety_factor(options.safetyFactor, label);
         end
 
         function textValue = formatImagingAutoExposureSummary(~, options)
-            if ~isstruct(options) || ~isfield(options, 'enabled') || ~logical(options.enabled)
-                textValue = "Off";
+            textValue = lw_format_auto_exposure_summary(options);
+        end
+
+        function onAutoExposureSafetyFactorChanged(obj, source, ~)
+            value = double(source.Value);
+            if ~isscalar(value) || ~isfinite(value) || value <= 1
                 return;
             end
-            sampleCount = 0;
-            if isfield(options, 'sampleCount')
-                sampleCount = options.sampleCount;
-            end
-            safetyFactor = 0.8;
-            if isfield(options, 'safetyFactor')
-                safetyFactor = options.safetyFactor;
-            end
-            safetyPercent = 100 * safetyFactor;
-            textValue = sprintf('On (%d Z samples, %.0f%% no-clip target)', sampleCount, safetyPercent);
+            obj.Model.Services.dialog.alert(obj.Model.Figure, sprintf([ ...
+                'Safety Factor %.3g is above 1.\n\n', ...
+                'The stack exposure will be %.0f%% of the estimated no-clip exposure, ', ...
+                'so the brightest sampled pixels are expected to saturate. ', ...
+                'Use 1 or less if peak intensities must stay measurable.'], value, 100 * value), ...
+                'Auto Exposure Safety Factor', 'Icon', 'warning');
         end
 
         function preflight = buildBatchImagingPreflight(obj, requireHardware)
@@ -313,6 +308,7 @@ classdef ImagingController < handle
             preflight.captureTimeoutMs = positiveInteger(obj.Model.Ui.ImagingTimeoutField.Value, 'Batch imaging capture timeout');
             preflight.exposureUs = positiveScalar(obj.Model.Ui.FlirExposureField.Value, 'FLIR exposure');
             preflight.gain = nonnegativeScalar(obj.Model.Ui.FlirGainField.Value, 'FLIR gain');
+            preflight.flirRoiText = obj.Ports.flir.flirRoiPreflightText();
             preflight.autoExposure = obj.imagingAutoExposureOptionsFromUi('Batch imaging');
             preflight.zPositions = imagingZPositions(preflight.zStart, preflight.zEnd, preflight.zStep);
             preflight.framesPerJob = numel(preflight.zPositions);
@@ -345,6 +341,7 @@ classdef ImagingController < handle
                 'FLIR Exposure: %.6g us\n', ...
                 'Auto Exposure: %s\n', ...
                 'FLIR Gain: %.6g dB\n', ...
+                'FLIR ROI: %s\n', ...
                 'Capture Timeout: %d ms\n', ...
                 'Output Folder: %s\n', ...
                 'Batch Table: %s\n', ...
@@ -354,7 +351,7 @@ classdef ImagingController < handle
                 preflight.x, preflight.displayY, preflight.zStart, preflight.zEnd, ...
                 preflight.zStep, preflight.settlingTime, preflight.exposureUs, ...
                 char(obj.formatImagingAutoExposureSummary(preflight.autoExposure)), ...
-                preflight.gain, preflight.captureTimeoutMs, preflight.runFolder, ...
+                preflight.gain, char(preflight.flirRoiText), preflight.captureTimeoutMs, preflight.runFolder, ...
                 preflight.tableFile, preflight.manifestFile, ...
                 connectionText(obj.Ports.stageLaser.areStagesConnected()), connectionText(obj.Ports.flir.isFlirConnected()), ...
                 connectionText(obj.isBatchSlmConnected()));
@@ -507,8 +504,9 @@ classdef ImagingController < handle
                     'pollIntervalSeconds', 0.02);
                 obj.Model.State.flir = obj.Model.Services.flir.startAcquisition(obj.Model.State.flir);
                 acquisitionStarted = true;
-                obj.Ports.logMessage(sprintf('FLIR acquisition started at %d x %d (%s), exposure %.6g us, gain %.6g dB.', ...
-                    width, height, char(regionInfo.Name), actualExposureUs, actualGain));
+                obj.Ports.logMessage(sprintf('FLIR acquisition started at %d x %d%s (%s), exposure %.6g us, gain %.6g dB.', ...
+                    width, height, obj.Ports.flir.flirFrameOffsetText(regionInfo), char(regionInfo.Name), ...
+                    actualExposureUs, actualGain));
 
                 scoutStopped = false;
                 if obj.imagingAutoExposureEnabled(preflight)

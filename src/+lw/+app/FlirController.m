@@ -56,6 +56,7 @@ classdef FlirController < handle
 
             obj.Model.State.flir = obj.Model.Services.flir.connect(obj.Model.State.flir, deviceIndex);
             obj.syncFlirSettingFieldsFromCamera();
+            obj.refreshFlirRoiLimits(true);
             obj.flirLive('update');
             obj.Ports.logMessage(sprintf('FLIR camera connected: %s.', selectedLabel));
         end
@@ -65,8 +66,13 @@ classdef FlirController < handle
         end
 
         function disconnectFlirImpl(obj)
+            if obj.Model.Ui.FlirRoiEditActive
+                obj.endFlirLiveRoiEdit();
+                obj.syncFlirRoiFieldsFromSelection();
+            end
             obj.flirLive('stop', false);
             obj.Model.State.flir = obj.Model.Services.flir.disconnect(obj.Model.State.flir);
+            obj.Model.FlirRoiLimits = struct();
             obj.refreshFlirDeviceDropDown();
             obj.Model.ImagingCurrentText = "Idle";
             obj.Model.ImagingProgressText = "0 / 0";
@@ -124,17 +130,14 @@ classdef FlirController < handle
                 obj.Model.State.flir, options);
             obj.Ports.showImagingFrame(frame, sprintf('Test capture %s', char(datetime('now', 'Format', 'HH:mm:ss'))));
             obj.Model.ImagingCurrentText = sprintf('Captured %d x %d %s', info.Width, info.Height, info.PixelFormat);
-            obj.Ports.logMessage(sprintf('FLIR test capture: %d x %d %s (%s).', ...
-                info.Width, info.Height, info.PixelFormat, char(obj.flirInfoRegionName(info))));
+            obj.Ports.logMessage(sprintf('FLIR test capture: %d x %d%s %s (%s).', ...
+                info.Width, info.Height, obj.flirFrameOffsetText(info), info.PixelFormat, ...
+                char(obj.flirInfoRegionName(info))));
             clear liveCleanupObj
         end
 
-        function regionName = flirCaptureRegion(obj)
-            regionName = "full";
-            if isfield(obj.Model.Config, 'imaging') && isfield(obj.Model.Config.imaging, 'captureRegion') && ...
-                    ~isempty(obj.Model.Config.imaging.captureRegion)
-                regionName = string(obj.Model.Config.imaging.captureRegion);
-            end
+        function region = flirCaptureRegion(obj)
+            region = obj.captureRegionForSelection(obj.flirRoiSelection());
         end
 
         function value = imagingConfigValue(obj, fieldName, fallbackValue)
@@ -150,6 +153,424 @@ classdef FlirController < handle
             if isfield(info, 'RoiName') && ~isempty(info.RoiName)
                 regionName = string(info.RoiName);
             end
+        end
+
+        function text = flirFrameOffsetText(~, info)
+            text = '';
+            if isstruct(info) && isfield(info, 'OffsetX') && isfield(info, 'OffsetY')
+                text = sprintf(' @ (%d, %d)', round(double(info.OffsetX)), round(double(info.OffsetY)));
+            end
+        end
+
+        function onApplyFlirRoi(obj, ~, ~)
+            obj.Ports.runUiAction(@() obj.applyFlirRoiImpl(), 'Failed to apply FLIR ROI');
+        end
+
+        function onCenterFlirRoi(obj, ~, ~)
+            obj.Ports.runUiAction(@() obj.centerFlirRoiImpl(), 'Failed to center FLIR ROI');
+        end
+
+        function selection = flirRoiSelection(obj)
+            selection = obj.Model.FlirRoiSelection;
+            if ~isstruct(selection) || ~isfield(selection, 'Mode')
+                selection = obj.defaultFlirRoiSelection();
+            end
+        end
+
+        function selection = defaultFlirRoiSelection(obj)
+            defaultRect = struct('OffsetX', 0, 'OffsetY', 0, 'Width', 512, 'Height', 512);
+            selection = lw_flir_roi_selection( ...
+                obj.imagingConfigValue('captureRegion', "full"), ...
+                obj.imagingConfigValue('defaultCustomRoi', defaultRect));
+        end
+
+        function region = captureRegionForSelection(~, selection)
+            if selection.Mode == "custom"
+                region = struct( ...
+                    'OffsetX', selection.OffsetX, ...
+                    'OffsetY', selection.OffsetY, ...
+                    'Width', selection.Width, ...
+                    'Height', selection.Height);
+            else
+                region = selection.Mode;
+            end
+        end
+
+        function loadSavedFlirRoiSelection(obj)
+            [obj.Model.FlirRoiSelection, message] = lw_flir_roi_selection_load( ...
+                obj.imagingConfigValue('roiSettingsFile', ""), obj.defaultFlirRoiSelection());
+            obj.syncFlirRoiFieldsFromSelection();
+            obj.syncFlirRoiInfo();
+            if strlength(message) > 0
+                obj.Ports.logMessage(sprintf('%s FLIR ROI: %s.', char(message), char(obj.flirRoiSelectionText())));
+            end
+        end
+
+        function saveFlirRoiSelection(obj)
+            filePath = string(obj.imagingConfigValue('roiSettingsFile', ""));
+            if strlength(filePath) == 0
+                return;
+            end
+            try
+                lw_flir_roi_selection_save(filePath, obj.flirRoiSelection(), obj.selectedFlirCameraLabel());
+            catch ME
+                obj.Ports.logMessage(sprintf('FLIR ROI applied but could not be saved: %s', compactErrorMessage(ME)));
+            end
+        end
+
+        function applyFlirRoiImpl(obj)
+            obj.requireFlirConnected();
+            requested = obj.flirRoiSelectionFromUi();
+            resumeLive = obj.flirLive('pause', 'Paused for ROI');
+            resumeLive = obj.endFlirLiveRoiEdit() || resumeLive;
+            liveCleanupObj = onCleanup(@() obj.flirLive('resume', resumeLive));
+
+            [obj.Model.State.flir, ~, ~, roi] = obj.Model.Services.flir.setCaptureRegion( ...
+                obj.Model.State.flir, obj.captureRegionForSelection(requested));
+            if isfield(roi, 'Name') && string(roi.Name) == "current-read-only"
+                obj.syncFlirRoiFieldsFromSelection();
+                error('FLIR ROI nodes are read-only; the camera kept %s.', char(obj.formatFlirRoiRect(roi)));
+            end
+
+            applied = requested;
+            if requested.Mode == "custom"
+                applied = lw_flir_roi_selection("custom", roi);
+            end
+            obj.Model.FlirRoiSelection = applied;
+            obj.syncFlirRoiFieldsFromSelection();
+            obj.refreshFlirRoiLimits(false);
+            obj.saveFlirRoiSelection();
+            if requested.Mode == "custom" && ...
+                    ~isequal(obj.flirRoiRectVector(applied), obj.flirRoiRectVector(requested))
+                obj.Ports.logMessage(sprintf('FLIR ROI snapped to camera steps: requested %s, applied %s.', ...
+                    char(obj.formatFlirRoiRect(requested)), char(obj.formatFlirRoiRect(applied))));
+            end
+            obj.Ports.logMessage(sprintf('FLIR ROI applied and saved: %s (camera %s).', ...
+                char(obj.flirRoiSelectionText()), char(obj.formatFlirRoiRect(roi))));
+            clear liveCleanupObj
+        end
+
+        function centerFlirRoiImpl(obj)
+            limits = obj.requireFlirRoiLimits();
+            rect = obj.flirRoiRectFromUi();
+            rect.OffsetX = (limits.SensorWidth - rect.Width) / 2;
+            rect.OffsetY = (limits.SensorHeight - rect.Height) / 2;
+            obj.setFlirRoiFields(lw_flir_normalize_roi(rect, limits));
+            obj.syncFlirRoiInfo();
+        end
+
+        function limits = refreshFlirRoiLimits(obj, shouldLog)
+            limits = struct();
+            obj.Model.FlirRoiLimits = struct();
+            if obj.isFlirConnected()
+                try
+                    limits = obj.Model.Services.flir.readRoiLimits(obj.Model.State.flir.nodeMap);
+                    obj.Model.FlirRoiLimits = limits;
+                    if shouldLog
+                        obj.Ports.logMessage(sprintf( ...
+                            'FLIR sensor %d x %d; ROI steps: width %d, height %d, offset X %d, offset Y %d.', ...
+                            limits.SensorWidth, limits.SensorHeight, limits.WidthIncrement, ...
+                            limits.HeightIncrement, limits.OffsetXIncrement, limits.OffsetYIncrement));
+                    end
+                catch ME
+                    if shouldLog
+                        obj.Ports.logMessage(sprintf('FLIR ROI limits could not be read: %s', compactErrorMessage(ME)));
+                    end
+                end
+            end
+            obj.syncFlirRoiInfo();
+        end
+
+        function limits = requireFlirRoiLimits(obj)
+            obj.requireFlirConnected();
+            limits = obj.Model.FlirRoiLimits;
+            if ~isstruct(limits) || ~isfield(limits, 'SensorWidth')
+                limits = obj.Model.Services.flir.readRoiLimits(obj.Model.State.flir.nodeMap);
+                obj.Model.FlirRoiLimits = limits;
+            end
+        end
+
+        function selection = flirRoiSelectionFromUi(obj)
+            selection = lw_flir_roi_selection( ...
+                obj.flirRoiModeFromLabel(obj.Model.Ui.FlirRoiModeDropDown.Value), obj.flirRoiRectFromUi());
+        end
+
+        function rect = flirRoiRectFromUi(obj)
+            rect = struct( ...
+                'OffsetX', obj.Model.Ui.FlirRoiOffsetXField.Value, ...
+                'OffsetY', obj.Model.Ui.FlirRoiOffsetYField.Value, ...
+                'Width', obj.Model.Ui.FlirRoiWidthField.Value, ...
+                'Height', obj.Model.Ui.FlirRoiHeightField.Value);
+        end
+
+        function setFlirRoiFields(obj, rect)
+            obj.Model.Ui.FlirRoiOffsetXField.Value = rect.OffsetX;
+            obj.Model.Ui.FlirRoiOffsetYField.Value = rect.OffsetY;
+            obj.Model.Ui.FlirRoiWidthField.Value = rect.Width;
+            obj.Model.Ui.FlirRoiHeightField.Value = rect.Height;
+        end
+
+        function syncFlirRoiFieldsFromSelection(obj)
+            if ~obj.hasValidUiControl('FlirRoiModeDropDown')
+                return;
+            end
+            selection = obj.flirRoiSelection();
+            obj.Model.Ui.FlirRoiModeDropDown.Value = obj.flirRoiModeLabel(selection.Mode);
+            obj.setFlirRoiFields(selection);
+        end
+
+        function tf = isFlirRoiCustomModeSelected(obj)
+            tf = obj.hasValidUiControl('FlirRoiModeDropDown') && ...
+                obj.flirRoiModeFromLabel(obj.Model.Ui.FlirRoiModeDropDown.Value) == "custom";
+        end
+
+        function tf = hasUnappliedFlirRoiEdits(obj)
+            tf = false;
+            if ~obj.hasValidUiControl('FlirRoiModeDropDown')
+                return;
+            end
+            try
+                pending = obj.flirRoiSelectionFromUi();
+            catch
+                tf = true;
+                return;
+            end
+            applied = obj.flirRoiSelection();
+            tf = pending.Mode ~= applied.Mode || (pending.Mode == "custom" && ...
+                ~isequal(obj.flirRoiRectVector(pending), obj.flirRoiRectVector(applied)));
+        end
+
+        function text = flirRoiSelectionText(obj)
+            selection = obj.flirRoiSelection();
+            switch selection.Mode
+                case "custom"
+                    text = obj.formatFlirRoiRect(selection);
+                case "top-left-quarter"
+                    text = "Top-left quarter";
+                otherwise
+                    text = "Full sensor";
+            end
+        end
+
+        function text = flirRoiPreflightText(obj)
+            text = obj.flirRoiSelectionText();
+            if obj.hasUnappliedFlirRoiEdits()
+                text = text + " (unapplied ROI edits in the panel are ignored)";
+            end
+        end
+
+        function syncFlirRoiInfo(obj)
+            if obj.hasValidUiControl('FlirRoiInfoLabel')
+                limits = obj.Model.FlirRoiLimits;
+                if obj.isFlirConnected() && isstruct(limits) && isfield(limits, 'SensorWidth')
+                    text = sprintf('Sensor %d x %d | Using %s', ...
+                        limits.SensorWidth, limits.SensorHeight, char(obj.flirRoiSelectionText()));
+                    if obj.hasUnappliedFlirRoiEdits()
+                        text = [text, ' | edits not applied'];
+                    end
+                else
+                    text = 'Connect FLIR to read the sensor size.';
+                end
+                obj.Model.Ui.FlirRoiInfoLabel.Text = text;
+            end
+            if obj.hasValidUiControl('FlirLiveRoiLabel')
+                obj.Model.Ui.FlirLiveRoiLabel.Text = char(obj.flirRoiSelectionText());
+            end
+        end
+
+        function drawFlirLiveRoiImpl(obj)
+            obj.requireFlirConnected();
+            if ~obj.isFlirLiveWindowOpen() || ~obj.hasValidUiControl('FlirLiveAxes')
+                error('Open the Live FLIR window before drawing an ROI.');
+            end
+            if exist('images.roi.Rectangle', 'class') ~= 8
+                error('Draw ROI needs the Image Processing Toolbox; type the ROI in the FLIR Camera panel instead.');
+            end
+
+            wasLive = obj.Model.Ui.FlirLiveEnabled;
+            resumeLive = obj.endFlirLiveRoiEdit();
+            resumeLive = obj.flirLive('pause', 'Drawing ROI') || resumeLive;
+            try
+                limits = obj.requireFlirRoiLimits();
+                [frame, info] = obj.flirRoiDrawFrame(wasLive);
+            catch ME
+                obj.flirLive('resume', resumeLive);
+                rethrow(ME);
+            end
+
+            obj.showFlirLiveFrame(frame, info);
+            obj.Model.Ui.FlirRoiEditBase = struct( ...
+                'OffsetX', obj.flirInfoOffset(info, 'OffsetX'), ...
+                'OffsetY', obj.flirInfoOffset(info, 'OffsetY'));
+            rect = images.roi.Rectangle(obj.Model.Ui.FlirLiveAxes, ...
+                'Color', [1, 0.25, 0.25], ...
+                'FaceAlpha', 0, ...
+                'LineWidth', 1.5);
+            obj.Model.Ui.FlirRoiDrawRect = rect;
+            obj.Model.Ui.FlirRoiEditActive = true;
+            obj.Model.Ui.FlirRoiEditResumeLive = resumeLive;
+            obj.flirLive('update', 'Drawing ROI');
+            obj.setFlirLiveAxesTitle('Drag a rectangle over the region to keep (Esc cancels)');
+            try
+                draw(rect);
+            catch
+            end
+
+            % Apply, Cancel, or closing the window during the drag already ended the edit.
+            if ~obj.Model.Ui.FlirRoiEditActive || ~isequal(obj.Model.Ui.FlirRoiDrawRect, rect)
+                return;
+            end
+            if ~isValidUiHandle(rect) || isempty(rect.Position) || any(rect.Position(3:4) <= 0)
+                obj.cancelFlirLiveRoiEditImpl();
+                return;
+            end
+
+            addlistener(rect, 'ROIMoved', @(source, ~) obj.onFlirLiveRoiMoved(source));
+            obj.updateFlirRoiFieldsFromLiveRect(rect, limits);
+            obj.flirLive('update', 'ROI drawn');
+            obj.setFlirLiveAxesTitle('Adjust the rectangle, then Apply ROI or Cancel');
+            obj.Ports.logMessage(sprintf('FLIR ROI drawn: %s. Click Apply ROI to use it.', ...
+                char(obj.formatFlirRoiRect(obj.flirRoiRectFromUi()))));
+        end
+
+        function [frame, info] = flirRoiDrawFrame(obj, wasLive)
+            flirState = obj.Model.State.flir;
+            if wasLive && isfield(flirState, 'lastFrame') && ~isempty(flirState.lastFrame) && ...
+                    isfield(flirState, 'lastFrameInfo') && isfield(flirState.lastFrameInfo, 'OffsetX')
+                frame = flirState.lastFrame;
+                info = flirState.lastFrameInfo;
+                return;
+            end
+            options = struct( ...
+                'timeoutMs', positiveInteger(obj.Model.Ui.ImagingTimeoutField.Value, 'FLIR capture timeout'), ...
+                'useNativeResolution', true, ...
+                'captureRegion', obj.flirCaptureRegion());
+            [obj.Model.State.flir, frame, info] = obj.Model.Services.flir.capture( ...
+                obj.Model.State.flir, options);
+        end
+
+        function value = flirInfoOffset(~, info, fieldName)
+            value = 0;
+            if isfield(info, fieldName) && isfinite(double(info.(fieldName)))
+                value = round(double(info.(fieldName)));
+            end
+        end
+
+        function onFlirLiveRoiMoved(obj, source)
+            try
+                if ~obj.Model.Ui.FlirRoiEditActive || ~isValidUiHandle(source) || isempty(source.Position)
+                    return;
+                end
+                obj.updateFlirRoiFieldsFromLiveRect(source, obj.requireFlirRoiLimits());
+            catch ME
+                obj.Ports.logMessage(sprintf('FLIR ROI update failed: %s', compactErrorMessage(ME)));
+            end
+        end
+
+        function updateFlirRoiFieldsFromLiveRect(obj, rect, limits)
+            % Axes pixel centers sit on integers, so the left image edge is x = 0.5.
+            base = obj.Model.Ui.FlirRoiEditBase;
+            position = double(rect.Position);
+            roi = lw_flir_normalize_roi(struct( ...
+                'OffsetX', base.OffsetX + position(1) - 0.5, ...
+                'OffsetY', base.OffsetY + position(2) - 0.5, ...
+                'Width', position(3), ...
+                'Height', position(4)), limits);
+            rect.Position = [roi.OffsetX - base.OffsetX + 0.5, roi.OffsetY - base.OffsetY + 0.5, ...
+                roi.Width, roi.Height];
+            rect.Label = sprintf('%d x %d', roi.Width, roi.Height);
+            obj.Model.Ui.FlirRoiModeDropDown.Value = obj.flirRoiModeLabel("custom");
+            obj.setFlirRoiFields(roi);
+            obj.syncFlirRoiInfo();
+        end
+
+        function applyFlirLiveRoiImpl(obj)
+            obj.applyFlirRoiImpl();
+            obj.showFlirLiveSnapshotIfIdle();
+        end
+
+        function applyFlirFullFrameImpl(obj)
+            obj.requireFlirConnected();
+            obj.Model.Ui.FlirRoiModeDropDown.Value = obj.flirRoiModeLabel("full");
+            obj.applyFlirRoiImpl();
+            obj.showFlirLiveSnapshotIfIdle();
+        end
+
+        function showFlirLiveSnapshotIfIdle(obj)
+            if obj.Model.Ui.FlirLiveEnabled || ~obj.isFlirLiveWindowOpen() || ~obj.isFlirConnected()
+                return;
+            end
+            [frame, info] = obj.flirRoiDrawFrame(false);
+            obj.showFlirLiveFrame(frame, info);
+        end
+
+        function cancelFlirLiveRoiEditImpl(obj)
+            wasEditing = obj.Model.Ui.FlirRoiEditActive;
+            resumeLive = obj.endFlirLiveRoiEdit();
+            obj.syncFlirRoiFieldsFromSelection();
+            obj.syncFlirRoiInfo();
+            if resumeLive
+                obj.flirLive('resume', true);
+            else
+                obj.flirLive('update');
+                if wasEditing
+                    obj.setFlirLiveAxesTitle('ROI drawing cancelled');
+                end
+            end
+            if wasEditing
+                obj.Ports.logMessage('FLIR ROI drawing cancelled.');
+            end
+        end
+
+        function resumeLive = endFlirLiveRoiEdit(obj)
+            resumeLive = logical(obj.Model.Ui.FlirRoiEditResumeLive);
+            rect = obj.Model.Ui.FlirRoiDrawRect;
+            obj.Model.Ui.FlirRoiDrawRect = [];
+            obj.Model.Ui.FlirRoiEditActive = false;
+            obj.Model.Ui.FlirRoiEditResumeLive = false;
+            try
+                if isValidUiHandle(rect)
+                    delete(rect);
+                end
+            catch
+            end
+        end
+
+        function tf = isFlirLiveRoiDrawn(obj)
+            rect = obj.Model.Ui.FlirRoiDrawRect;
+            tf = obj.Model.Ui.FlirRoiEditActive && isValidUiHandle(rect) && ~isempty(rect.Position);
+        end
+
+        function label = flirRoiModeLabel(~, mode)
+            switch string(mode)
+                case "custom"
+                    label = 'Custom';
+                case "top-left-quarter"
+                    label = 'Top-left quarter';
+                otherwise
+                    label = 'Full sensor';
+            end
+        end
+
+        function mode = flirRoiModeFromLabel(~, label)
+            switch string(label)
+                case "Custom"
+                    mode = "custom";
+                case "Top-left quarter"
+                    mode = "top-left-quarter";
+                otherwise
+                    mode = "full";
+            end
+        end
+
+        function values = flirRoiRectVector(~, rect)
+            values = double([rect.OffsetX, rect.OffsetY, rect.Width, rect.Height]);
+        end
+
+        function text = formatFlirRoiRect(~, rect)
+            text = string(sprintf('%d x %d @ (%d, %d)', ...
+                round(double(rect.Width)), round(double(rect.Height)), ...
+                round(double(rect.OffsetX)), round(double(rect.OffsetY))));
         end
 
         function gain = flirLiveGainValue(obj)
@@ -308,7 +729,15 @@ classdef FlirController < handle
                     'Failed to update FLIR live timeout'), ...
                 'periodChanged', @(value) obj.Ports.runUiAction(@() obj.setFlirLivePeriodSeconds(value), ...
                     'Failed to update FLIR live period'), ...
-                'markerChanged', @(~, ~) obj.redrawLastFlirLiveFrame());
+                'markerChanged', @(~, ~) obj.redrawLastFlirLiveFrame(), ...
+                'drawRoi', @(~, ~) obj.Ports.runUiAction(@() obj.drawFlirLiveRoiImpl(), ...
+                    'Failed to draw FLIR ROI'), ...
+                'fullFrameRoi', @(~, ~) obj.Ports.runUiAction(@() obj.applyFlirFullFrameImpl(), ...
+                    'Failed to switch FLIR to full frame'), ...
+                'applyRoi', @(~, ~) obj.Ports.runUiAction(@() obj.applyFlirLiveRoiImpl(), ...
+                    'Failed to apply FLIR ROI'), ...
+                'cancelRoi', @(~, ~) obj.Ports.runUiAction(@() obj.cancelFlirLiveRoiEditImpl(), ...
+                    'Failed to cancel FLIR ROI drawing'));
             options = struct('selectedCameraLabel', obj.selectedFlirCameraLabel());
             obj.Ports.mergeUi(lw_build_flir_live_window(obj.Model.Figure, callbacks, obj.Ports.uiBuildHelpers(), options));
         end
@@ -399,6 +828,10 @@ classdef FlirController < handle
                     obj.requireFlirConnected();
                     if ~obj.isFlirLiveWindowOpen()
                         error('Open the Live FLIR window before starting live view.');
+                    end
+                    if obj.Model.Ui.FlirRoiEditActive
+                        obj.endFlirLiveRoiEdit();
+                        obj.syncFlirRoiFieldsFromSelection();
                     end
                     obj.Model.Ui.FlirLiveEnabled = true;
                     obj.Model.Ui.FlirLiveFrameCount = 0;
@@ -637,8 +1070,9 @@ classdef FlirController < handle
             axis(obj.Model.Ui.FlirLiveAxes, 'image');
             obj.Model.Ui.FlirLiveAxes.XTick = [];
             obj.Model.Ui.FlirLiveAxes.YTick = [];
-            obj.setFlirLiveAxesTitle(sprintf('Live %s | %d x %d %s', ...
-                char(datetime('now', 'Format', 'HH:mm:ss')), info.Width, info.Height, info.PixelFormat));
+            obj.setFlirLiveAxesTitle(sprintf('Live %s | %d x %d%s %s', ...
+                char(datetime('now', 'Format', 'HH:mm:ss')), info.Width, info.Height, ...
+                obj.flirFrameOffsetText(info), info.PixelFormat));
         end
 
         function tf = flirLiveMarkersEnabled(obj)
@@ -646,6 +1080,10 @@ classdef FlirController < handle
         end
 
         function redrawLastFlirLiveFrame(obj)
+            if obj.Model.Ui.FlirRoiEditActive
+                % Redrawing the image would delete the ROI rectangle being edited.
+                return;
+            end
             if ~isfield(obj.Model.State, 'flir') || ~isfield(obj.Model.State.flir, 'lastFrame') || isempty(obj.Model.State.flir.lastFrame)
                 return;
             end
@@ -762,6 +1200,7 @@ classdef FlirController < handle
                 end
             end
             obj.refreshFlirLiveReadouts(false);
+            obj.syncFlirRoiInfo();
             obj.syncFlirLiveWindowControlEnableStates();
         end
 
@@ -770,7 +1209,12 @@ classdef FlirController < handle
                 return;
             end
             canUseFlir = obj.isFlirConnected() && ~obj.Model.State.isBusy && ~obj.Model.State.isPaused && ~obj.Model.PausedManualMotionActive;
-            obj.setEnableIfValid('FlirLiveButton', canUseFlir);
+            roiEditing = obj.Model.Ui.FlirRoiEditActive;
+            obj.setEnableIfValid('FlirLiveButton', canUseFlir && ~roiEditing);
+            obj.setEnableIfValid('FlirLiveDrawRoiButton', canUseFlir);
+            obj.setEnableIfValid('FlirLiveFullFrameButton', canUseFlir && ~roiEditing);
+            obj.setEnableIfValid('FlirLiveApplyRoiButton', canUseFlir && obj.isFlirLiveRoiDrawn());
+            obj.setEnableIfValid('FlirLiveCancelRoiButton', roiEditing);
             obj.setEnableIfValid('FlirLiveExposureField', canUseFlir);
             obj.setEnableIfValid('FlirLiveApplyExposureButton', canUseFlir);
             obj.setEnableIfValid('FlirLiveGainField', canUseFlir);
@@ -798,7 +1242,12 @@ classdef FlirController < handle
             if isfield(obj.Model.Ui, 'FlirLiveFigure')
                 liveFigure = obj.Model.Ui.FlirLiveFigure;
             end
+            wasEditingRoi = obj.Model.Ui.FlirRoiEditActive;
+            obj.endFlirLiveRoiEdit();
             obj.clearFlirLiveWindowHandles();
+            if wasEditingRoi
+                obj.syncFlirRoiFieldsFromSelection();
+            end
             try
                 if isValidUiHandle(liveFigure)
                     liveFigure.CloseRequestFcn = [];
@@ -824,6 +1273,11 @@ classdef FlirController < handle
             obj.Model.Ui.FlirLiveTimeoutField = [];
             obj.Model.Ui.FlirLivePeriodField = [];
             obj.Model.Ui.FlirLiveMarkerCheckBox = [];
+            obj.Model.Ui.FlirLiveRoiLabel = [];
+            obj.Model.Ui.FlirLiveDrawRoiButton = [];
+            obj.Model.Ui.FlirLiveFullFrameButton = [];
+            obj.Model.Ui.FlirLiveApplyRoiButton = [];
+            obj.Model.Ui.FlirLiveCancelRoiButton = [];
         end
 
         function requireFlirConnected(obj)
@@ -854,6 +1308,7 @@ classdef FlirController < handle
             else
                 obj.Model.Ui.FlirStatusLabel.Text = 'Disconnected';
             end
+            obj.syncFlirRoiInfo();
             obj.flirLive('update');
         end
 

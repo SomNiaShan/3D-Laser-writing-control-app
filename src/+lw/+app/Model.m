@@ -8,6 +8,7 @@ classdef Model < handle
         Ui
         Figure = []
         Trajectory = []
+        PreparedPlan = []
         TrajectoryInputsDirty = false
         RunProgressText = "0 / 0"
         RunCurrentText = "Idle"
@@ -22,10 +23,14 @@ classdef Model < handle
         SourceModeMemory = struct()
         CurrentSourceMode = "Imported Points"
         PausedManualMotionActive = false
+        ManualStageMoveActive = false
         ImagingRunActive = false
+        FlirRoiSelection = struct()
+        FlirRoiLimits = struct()
         LastPositionRefreshTic
         RunLog
         MakoController = []
+        SlmController = []
         SavedStagePositions
         PreviewMaxPoints = 50000
         ZSweepPreviewMaxRuns = 500
@@ -65,8 +70,6 @@ classdef Model < handle
             ui.PositionTimerPeriodSeconds = 0.2;
             ui.PositionPollInProgress = false;
             ui.PositionPollFailureCount = 0;
-            ui.SlmControlFigure = [];
-            ui.OpenSlmControlButton = [];
             ui.OpenFlirLiveWindowButton = [];
             ui.FlirLiveFigure = [];
             ui.FlirLiveAxes = [];
@@ -84,6 +87,15 @@ classdef Model < handle
             ui.FlirLiveTimeoutField = [];
             ui.FlirLivePeriodField = [];
             ui.FlirLiveMarkerCheckBox = [];
+            ui.FlirLiveRoiLabel = [];
+            ui.FlirLiveDrawRoiButton = [];
+            ui.FlirLiveFullFrameButton = [];
+            ui.FlirLiveApplyRoiButton = [];
+            ui.FlirLiveCancelRoiButton = [];
+            ui.FlirRoiDrawRect = [];
+            ui.FlirRoiEditActive = false;
+            ui.FlirRoiEditResumeLive = false;
+            ui.FlirRoiEditBase = struct('OffsetX', 0, 'OffsetY', 0);
             ui.ImagingAutoExposureCheckBox = [];
             ui.ImagingAutoExposureSamplesField = [];
             ui.ImagingAutoExposureSafetyFactorField = [];

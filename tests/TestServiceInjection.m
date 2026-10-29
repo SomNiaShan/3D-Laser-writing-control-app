@@ -21,12 +21,15 @@ classdef TestServiceInjection < matlab.unittest.TestCase
             testCase.verifyTrue(isa(services.stage.home, 'function_handle'));
             testCase.verifyTrue(isa(services.flir.capture, 'function_handle'));
             testCase.verifyTrue(isa(services.dialog.confirm, 'function_handle'));
+            testCase.verifyTrue(isa(services.dialog.prompt, 'function_handle'));
         end
 
         function closeUsesInjectedServices(testCase)
             calls = ValueBox(strings(1, 0));
             overrides = struct( ...
-                'slm', struct('batchAction', @(~, ~, ~, ~) recordCall(calls, "slm")), ...
+                'slm', struct( ...
+                    'shutdown', @(controller) recordSlmShutdown(calls, controller), ...
+                    'batchAction', @(fig, ~, ~, ~) recordCall(calls, "batchSlm:" + string(isvalid(fig)))), ...
                 'stage', struct('disconnectAll', @(state, ~) recordState(calls, "stage", state)));
 
             fig = laser_writing_app_refactored(overrides);
@@ -35,13 +38,18 @@ classdef TestServiceInjection < matlab.unittest.TestCase
             close(fig);
             drawnow;
 
-            testCase.verifyEqual(calls.Value, ["slm", "stage"]);
+            testCase.verifyEqual(calls.Value, ["slmShutdown", "batchSlm:true", "stage"]);
         end
     end
 end
 
 function recordCall(calls, name)
 calls.Value(end + 1) = name;
+end
+
+function recordSlmShutdown(calls, controller)
+calls.Value(end + 1) = "slmShutdown";
+feval(controller.shutdown);
 end
 
 function state = recordState(calls, name, state)

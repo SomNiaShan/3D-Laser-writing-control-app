@@ -292,7 +292,7 @@ files = struct( ...
     'preflightText', char(runLog.preflightTextFile));
 maybeFiles = {
     'trajectory', fullfile(char(runLog.folder), 'trajectory.csv')
-    'cutPlan', fullfile(char(runLog.folder), 'cut_plan.csv')
+    'writingPlan', fullfile(char(runLog.folder), 'writing_plan.csv')
     'zSweepJobs', fullfile(char(runLog.folder), 'z_sweep_jobs.csv')
     'error', char(runLog.errorFile)
     };
@@ -361,27 +361,15 @@ end
 if isfield(preflight, 'trajectory')
     manifest.trajectory = trajectorySummary(preflight.trajectory, config);
 end
-if isfield(preflight, 'pauseSeconds')
-    manifest.point = struct( ...
-        'pauseSeconds', preflight.pauseSeconds, ...
-        'exposureTimeSeconds', preflight.exposureTimeSeconds, ...
-        'exposureMicroseconds', preflight.exposureMicroseconds);
+if isfield(preflight, 'pointTiming')
+    manifest.point = preflight.pointTiming;
 end
-if isfield(preflight, 'pulseSpeedMmPerSecond')
-    manifest.stream = struct( ...
-        'pulseSpeedMmPerSecond', preflight.pulseSpeedMmPerSecond, ...
-        'powerPercent', preflight.powerPercent, ...
-        'ttlGateWidthUs', preflight.ttlGateWidthUs, ...
-        'maxLaserRepetitionRateKHz', preflight.maxLaserRepetitionRateKHz, ...
-        'maxTriggerRateHz', preflight.maxTriggerRateHz, ...
-        'requiredTriggerRateHz', preflight.requiredTriggerRateHz, ...
-        'minIntervalSeconds', preflight.minIntervalSeconds);
-end
-if isfield(preflight, 'cutPlan') && istable(preflight.cutPlan)
-    manifest.cutPlan = struct( ...
-        'rowCount', height(preflight.cutPlan), ...
-        'groupCount', cutGroupCount(preflight), ...
-        'variableNames', {preflight.cutPlan.Properties.VariableNames});
+writingPlan = canonicalWritingPlan(preflight);
+if height(writingPlan) > 0
+    manifest.writingPlan = struct( ...
+        'rowCount', height(writingPlan), ...
+        'groupCount', pathGroupCount(preflight, writingPlan), ...
+        'variableNames', {writingPlan.Properties.VariableNames});
 end
 if isfield(preflight, 'sweep')
     manifest.zSweep = sweepSummary(preflight.sweep, config);
@@ -407,11 +395,11 @@ else
 end
 end
 
-function count = cutGroupCount(preflight)
-if isfield(preflight, 'cutGroups')
-    count = numel(preflight.cutGroups);
+function count = pathGroupCount(preflight, writingPlan)
+if isfield(preflight, 'pathGroups')
+    count = numel(preflight.pathGroups);
 else
-    count = NaN;
+    count = numel(lw_path_plan_groups(writingPlan));
 end
 end
 
@@ -434,6 +422,12 @@ summary.z = valueRange(traj.z);
 if isfield(traj, 'power')
     summary.powerPercent = valueRange(traj.power);
 end
+if isfield(traj, 'dwellSeconds')
+    summary.dwellSeconds = valueRange(traj.dwellSeconds);
+end
+if isfield(traj, 'preWritePauseSeconds')
+    summary.preWritePauseSeconds = valueRange(traj.preWritePauseSeconds);
+end
 if summary.pointCount > 0
     summary.firstPoint = trajectoryPoint(traj, 1, config);
     summary.lastPoint = trajectoryPoint(traj, summary.pointCount, config);
@@ -447,9 +441,17 @@ point = struct( ...
     'yStage', traj.y(index), ...
     'yDisplay', yDisplayFromStage(traj.y(index), config), ...
     'z', traj.z(index), ...
-    'powerPercent', NaN);
+    'powerPercent', NaN, ...
+    'dwellSeconds', NaN, ...
+    'preWritePauseSeconds', NaN);
 if isfield(traj, 'power') && numel(traj.power) >= index
     point.powerPercent = traj.power(index);
+end
+if isfield(traj, 'dwellSeconds') && numel(traj.dwellSeconds) >= index
+    point.dwellSeconds = traj.dwellSeconds(index);
+end
+if isfield(traj, 'preWritePauseSeconds') && numel(traj.preWritePauseSeconds) >= index
+    point.preWritePauseSeconds = traj.preWritePauseSeconds(index);
 end
 end
 
@@ -512,7 +514,8 @@ summary = struct();
 if isempty(resumeContext) || ~isstruct(resumeContext)
     return;
 end
-fields = {'kind', 'runMode', 'nextPointIndex', 'nextCutIndex', 'jobIndex', 'stepIndex', 'progressOffset'};
+fields = {'kind', 'runMode', 'nextPointIndex', 'nextPathGroupIndex', ...
+    'jobIndex', 'stepIndex', 'progressOffset'};
 for i = 1:numel(fields)
     if isfield(resumeContext, fields{i})
         summary.(fields{i}) = resumeContext.(fields{i});
@@ -588,12 +591,14 @@ if isfield(preflight, 'trajectory')
     end
 end
 
-if isfield(preflight, 'cutPlan') && istable(preflight.cutPlan)
+writingPlan = canonicalWritingPlan(preflight);
+if height(writingPlan) > 0
     try
-        writeCutPlanSnapshot(preflight.cutPlan, fullfile(char(runLog.folder), 'cut_plan.csv'), config);
+        writeWritingPlanSnapshot(writingPlan, ...
+            fullfile(char(runLog.folder), 'writing_plan.csv'), config);
     catch ME
         appendRunLogEvent(runLog, 'snapshot_write_warning', struct( ...
-            'file', 'cut_plan.csv', ...
+            'file', 'writing_plan.csv', ...
             'message', compactErrorMessage(ME)));
     end
 end
@@ -609,11 +614,31 @@ if isfield(preflight, 'sweepJobs')
 end
 end
 
+function writingPlan = canonicalWritingPlan(preflight)
+writingPlan = table();
+if isfield(preflight, 'writingPlan') && istable(preflight.writingPlan)
+    writingPlan = preflight.writingPlan;
+elseif isfield(preflight, 'trajectory') && isstruct(preflight.trajectory) && ...
+        isfield(preflight.trajectory, 'writingPlan') && ...
+        istable(preflight.trajectory.writingPlan)
+    writingPlan = preflight.trajectory.writingPlan;
+end
+end
+
 function writeTrajectorySnapshot(traj, outputPath, config)
 pointCount = numel(traj.x);
 powerValues = nan(pointCount, 1);
 if isfield(traj, 'power') && numel(traj.power) == pointCount
     powerValues = traj.power(:);
+end
+dwellSeconds = nan(pointCount, 1);
+if isfield(traj, 'dwellSeconds') && numel(traj.dwellSeconds) == pointCount
+    dwellSeconds = traj.dwellSeconds(:);
+end
+preWritePauseSeconds = nan(pointCount, 1);
+if isfield(traj, 'preWritePauseSeconds') && ...
+        numel(traj.preWritePauseSeconds) == pointCount
+    preWritePauseSeconds = traj.preWritePauseSeconds(:);
 end
 
 index = (1:pointCount).';
@@ -623,14 +648,16 @@ yDisplay = yDisplayFromStage(yStage, config);
 z = traj.z(:);
 powerPercent = powerValues(:);
 snapshotTable = table(index, x, yStage, yDisplay, z, powerPercent, ...
-    'VariableNames', {'Index', 'X', 'YStage', 'YDisplay', 'Z', 'PowerPercent'});
+    dwellSeconds, preWritePauseSeconds, ...
+    'VariableNames', {'Index', 'X', 'YStage', 'YDisplay', 'Z', 'PowerPercent', ...
+    'DwellSeconds', 'PreWritePauseSeconds'});
 writetable(snapshotTable, outputPath);
 end
 
-function writeCutPlanSnapshot(cutPlan, outputPath, config)
-snapshotTable = cutPlan;
-stageNames = {'y', 'y2', 'leadY', 'exitY'};
-displayNames = {'yDisplay', 'y2Display', 'leadYDisplay', 'exitYDisplay'};
+function writeWritingPlanSnapshot(writingPlan, outputPath, config)
+snapshotTable = writingPlan;
+stageNames = {'y', 'y2'};
+displayNames = {'yDisplay', 'y2Display'};
 for i = 1:numel(stageNames)
     if ismember(stageNames{i}, snapshotTable.Properties.VariableNames)
         snapshotTable.(displayNames{i}) = yDisplayFromStage(snapshotTable.(stageNames{i}), config);
